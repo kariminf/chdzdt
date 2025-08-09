@@ -1,0 +1,216 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+#  Copyright 2025 Abdelkrime Aries <kariminfo0@gmail.com>
+#
+#  ---- AUTHORS ----
+# 2025	Abdelkrime Aries <kariminfo0@gmail.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import argparse
+import re
+from typing        import List, Union
+import getopt
+import os
+import sys
+import sqlite3
+import pandas as pd
+from typing import Dict, Set
+from itertools import product
+
+SUB = {
+    'i': ['1', '!'],
+    'a': ['@', '4'],
+    's': ['$', '5'],
+    'o': ['0'],
+    'e': ['3'],
+    't': ['7', '+']
+    }
+
+SUBDZ = {
+    # 'j': ['dj'],
+    '7': ['h'],
+    'kh': ["7'", '5'],
+    'ch': ['sh'],
+    's': ['9'],
+    't': ['6'],
+    'dh': ["6'"],
+    'gh': ["3'"],
+    'q': ['g'],
+    'ou': ['o', 'oo'],
+    'y': ['i'],
+}
+
+# =============================================
+
+def extract(clusters: Dict[str, Set[str]], out_url:str, min_length: int = 2, form: str = "all"):
+
+    save_key = form != "fnouns"
+
+    print("saving ...")
+    out_url = os.path.expanduser(out_url)
+    i = -1
+    out_f2 = open(out_url.replace(".csv", "_unic.csv"), "w", encoding="utf8")
+    with open(out_url, "w", encoding="utf8") as out_f:
+        
+        out_f.write("word\tcluster\n")
+        for root, words in clusters.items():
+            if (not root ) or (len(words) < min_length): continue
+            i += 1
+            out_f2.write(f"{root}\n")
+            if save_key:
+                out_f.write(f"{root}\t{i}\n")
+            for word in words:
+                if not word: continue
+                out_f.write(f"{word}\t{i}\n")
+    out_f2.close()
+    print("extraction finished")
+
+
+def deobfuscate_latin_word(word: str) -> str:
+    word = word.lower() 
+    word = re.sub(r'[1!î]', 'i', word) 
+    word = re.sub(r'[@â4]', 'a', word) 
+    word = re.sub(r'[$5]', 's', word)
+    word = re.sub(r'[0]', 'o', word)
+    word = re.sub(r'[3éè]', 'e', word)
+    word = re.sub(r'[7+]', 't', word)
+    return word.strip()
+
+def txtlist_extract(in_url: str, deobfus: bool= True) -> Dict[str, Set[str]]:
+    clusters = {}
+    in_url = os.path.expanduser(in_url)
+
+    with open(in_url, "r", encoding="utf8") as f:
+        for obfus in f:
+            obfus = obfus.strip()
+            if not obfus: continue
+            word = obfus
+            if deobfus:
+                word = deobfuscate_latin_word(obfus)
+            if word not in clusters:
+                clusters[word] = set()
+            if word != obfus:
+                clusters[word].add(obfus)
+     
+    return clusters
+
+
+def generate_variants(word):
+        # For each character, get possible substitutions (including itself)
+        chars = []
+        for c in word:
+            if c in SUB:
+                chars.append([c] + SUB[c])
+            else:
+                chars.append([c])
+
+        # Generate all combinations except the original word
+        variants = set()
+        for combo in product(*chars):
+            variant = ''.join(combo)
+            if "5" in variant and "$" in variant:
+                continue
+            if "1" in variant and "!" in variant:
+                continue
+            if "7" in variant and "+" in variant:
+                continue
+            if "4" in variant and "@" in variant:
+                continue
+
+            if variant != word:
+                variants.add(variant)
+        return variants
+
+def augment_latin(clusters: Dict[str, Set[str]]) -> None:
+    for word, noise in clusters.items():
+        variants = generate_variants(word)
+        noise.update(variants)
+
+def generate_dz_variants(word: str) -> Set[str]:
+    variants = set()
+    for c, subs in SUBDZ.items():
+        if c in word:
+            for sub in subs:
+                # replace only the first occurrence of c
+                variant = word.replace(c, sub, 1)
+                variants.add(variant)
+    return variants
+
+def augment_dz(clusters: Dict[str, Set[str]]) -> None:
+    
+    for word, noise in clusters.items():
+        noise.update(generate_dz_variants(word))
+
+    for word, noise in clusters.items():
+        changed = True
+        while changed:
+            added = set()
+            changed = False
+            for noisyword in noise:
+                if noisyword == word: continue
+                # generate variants for the noisy word
+                variants = generate_dz_variants(noisyword)
+                added = variants - noise  
+                noise.update(added)
+                changed = changed or bool(added)
+
+
+# =============================================
+#          Command line functions
+# =============================================
+
+def process_extract(args):
+
+    if args.a in ["fr", "en"]:
+        clusters = txtlist_extract(args.input) 
+        augment_latin(clusters)
+    elif args.a == "dz":
+        clusters = txtlist_extract(args.input, deobfus=False) 
+        augment_dz(clusters)
+
+    extract(clusters, args.output, min_length=args.n, form="all")
+    
+
+
+parser = argparse.ArgumentParser(description="extract sentences from tatoeba by language labels")
+
+# parser.add_argument("-t", help="source type", default="arramooz", choices=["arramooz", "morphynet", "qutrub"])
+# parser.add_argument("-f", help="form", default="all", choices=["all", "nouns", "fnouns", "verbs"],)
+parser.add_argument("-a", help="augment data language", default=None, choices=["ar", "fr", "en", "dz"])
+parser.add_argument("-n", help="min number of cluster elements", default=1, type=int)
+parser.add_argument("input", help="input the source file")
+parser.add_argument("output", help="output csv file containing words and their clusters")
+parser.set_defaults(func=process_extract)
+
+
+if __name__ == "__main__":
+
+    ILOC = "~/Data/DZDT/test/lexicon/source/dz_bad-words.txt"
+    OLOC = "~/Data/DZDT/test/lexicon/dz_taboo_cls.csv"
+
+    argv = sys.argv[1:]
+
+    argv = [
+        "-a", "dz",
+        "-n", "1",
+        ILOC,
+        OLOC
+    ]
+
+    args = parser.parse_args(argv)
+    # print(args)
+    # parser.print_help()
+    args.func(args)

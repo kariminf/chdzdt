@@ -1,0 +1,406 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+#  Copyright 2025 Abdelkrime Aries <kariminfo0@gmail.com>
+#
+#  ---- AUTHORS ----
+# 2025	Abdelkrime Aries <kariminfo0@gmail.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import argparse
+import sys
+import os
+from typing import Tuple, List
+import pandas as pd
+import torch
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score
+from sklearn.metrics import silhouette_score
+from transformers import BertTokenizer, BertForMaskedLM, BertModel
+from transformers import AutoTokenizer, AutoModelForMaskedLM
+from transformers import CanineTokenizer, CanineModel
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import umap
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+from dzdt.model.chdzdt_tok import CharTokenizer
+from dzdt.tools.const import char_tokenizer_config, word_tokenizer_config
+from dzdt.model.chdzdt_mdl import MLMLMBertModel
+
+# =============================================
+#          Models loading 
+# =============================================
+
+def load_chdzdt_model(plm_loc: str) -> Tuple[CharTokenizer, MLMLMBertModel]:
+    """ Load a CHDZDT model from the specified path.
+    Args:
+        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
+    Returns:
+        Tuple[CharTokenizer, MLMLMBertModel]: A tuple containing the character tokenizer and the model.
+    """
+    plm_loc = os.path.expanduser(plm_loc)
+    # print("loading characters tokenizer")
+    char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pickle"))
+
+    # print("loading characters encoder")
+    char_tokenizer_config()
+    char_encoder = MLMLMBertModel.from_pretrained(plm_loc)
+    word_tokenizer_config()
+
+    return char_tokenizer, char_encoder
+
+def load_bertlike_model(plm_loc: str) -> Tuple[BertTokenizer, BertModel]:
+    """ Load a BERT-like model from the specified path.
+    This function supports models like BERT, RoBERTa, and others that are compatible with the Hugging Face Transformers library.
+    Args:
+        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
+    Returns:
+        Tuple[BertTokenizer, BertModel]: A tuple containing the tokenizer and the model.
+    """
+    plm_loc = os.path.expanduser(plm_loc)
+    tokenizer = AutoTokenizer.from_pretrained(plm_loc)
+    model = AutoModelForMaskedLM.from_pretrained(plm_loc)
+    if isinstance(model, BertModel):
+        return tokenizer, model
+    
+    if hasattr(model, 'base_model'):    
+        return tokenizer, model.base_model
+    
+    return tokenizer, model.bert
+
+def load_canine_model(plm_loc: str) -> Tuple[CanineTokenizer, CanineModel]:
+    """ Load a Canine model from the specified path.
+    Args:
+        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
+    Returns:
+        Tuple[CanineTokenizer, CanineModel]: A tuple containing the Canine tokenizer and the model.
+    """
+    plm_loc = os.path.expanduser(plm_loc)
+    tokenizer = CanineTokenizer.from_pretrained(plm_loc)
+    model = CanineModel.from_pretrained(plm_loc)
+    if isinstance(model, BertModel):
+        return tokenizer, model
+    
+    if hasattr(model, 'base_model'):    
+        return tokenizer, model.base_model
+    
+    return tokenizer, model.bert 
+
+
+
+def arabert_preprocess(texts: List[str], model_name: str) -> List[str]:
+    from arabert.preprocess import ArabertPreprocessor
+    arabert_prep = ArabertPreprocessor(model_name=model_name)
+    result = []
+    for text in texts: 
+        result.append(arabert_prep.preprocess(text))
+    return result
+
+
+
+
+# =============================================
+#          Data loading and processing
+# =============================================
+
+   
+
+def get_cluster_data(url: str) -> pd.DataFrame:
+    url = os.path.expanduser(url)
+    data = pd.read_csv(url, sep="\t", encoding="utf8")
+    data["word"] = data["word"].astype(str)
+    data["cluster"] = data["cluster"].astype(int)
+    return data
+
+def get_noisy_data(url: str) -> Tuple[List[str], List[str], List[str]]:
+    url = os.path.expanduser(url)
+    data = pd.read_csv(url, sep="\t", encoding="utf8")
+    data = data.astype(str)
+    return (data["word"].tolist(), 
+            data["obfus1fix"].tolist(), 
+            data["obfus1var"].tolist())
+
+
+def get_embeddings(words: List[str], tokenizer: BertTokenizer, bert: BertModel) -> Tuple[torch.Tensor, torch.Tensor]:
+    
+    tokens = tokenizer(words, return_tensors="pt", padding=True, truncation=True, add_special_tokens=True)
+    with torch.no_grad():
+        outputs = bert(**tokens)
+
+    return outputs.last_hidden_state[:, 0, :], outputs.last_hidden_state[:, 1:-1, :].mean(dim=1)
+
+
+# =============================================
+#          Statistical functions 
+# =============================================
+
+def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
+    """Calculate the cosine similarity between two aligned sets of embeddings (row-wise)."""
+    return (np.sum(emb1 * emb2, axis=1) / (np.linalg.norm(emb1, axis=1) * np.linalg.norm(emb2, axis=1))).mean()
+
+# returns adjusted rand score over the clusters
+def get_kmeans_ars(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
+
+    # Perform KMeans clustering
+    kmeans = KMeans(n_clusters=np.unique(true_labels).size, random_state=42)
+    predicted_labels = kmeans.fit_predict(embeddings)
+
+    return adjusted_rand_score(true_labels, predicted_labels)
+
+# returns sillouette
+def get_silhouette(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
+    return silhouette_score(embeddings, true_labels)
+
+# returns average cosine similarity and euclidean distance  #
+# of elements of each cluster with their first element (representative)
+def get_cluster_cos_euc(embeddings: np.ndarray, true_labels: np.ndarray) -> Tuple[float, float]:
+    sim = 0.0
+    euc = 0.0
+
+    current_label = None
+    rep_embedding = None
+
+    for embedding, label in zip(embeddings, true_labels):
+        if current_label != label:                 
+            current_label = label
+            rep_embedding = embedding
+            continue
+
+        sim += np.dot(embedding, rep_embedding) / (np.linalg.norm(embedding) * np.linalg.norm(rep_embedding))
+        euc += np.linalg.norm(embedding - rep_embedding)
+
+    #  TODO you can add Box plot of similarity and distance 
+
+    nbr = len(true_labels) - len(np.unique(true_labels))
+
+    return sim/nbr, euc/nbr
+
+def graphical_plot(xy: np.ndarray, labels: np.ndarray, output_url: str):
+    plt.figure(figsize=(10, 10))
+    plt.scatter(xy[:, 0], xy[:, 1], c=labels, cmap='hsv', alpha=0.8)
+    plt.title("Visualization of Word Embeddings")
+    plt.xlabel("Component 1")
+    plt.ylabel("Component 2")
+    plt.colorbar(label='Cluster Label')
+    plt.legend()
+    plt.savefig(output_url)
+    plt.close()  
+
+def graphical_clustering(embeddings: np.ndarray, true_labels: np.ndarray, output_url: str):
+    """
+    Visualize the clustering of embeddings using t-SNE and save the plot to output_url.
+    """
+
+    output_url = os.path.expanduser(output_url)
+
+    print("calculating TSNE ...")
+    tsne = TSNE(n_components=2, random_state=42, max_iter=1000, verbose=0, n_jobs=-1)
+    tsne_emb = tsne.fit_transform(embeddings)
+    graphical_plot(tsne_emb, true_labels, output_url + "_tsne.png")
+
+    print("calculating UMAP ...")
+    reducer = umap.UMAP(n_neighbors=29, min_dist=0.1, metric='cosine', random_state=42)
+    umap_emb = reducer.fit_transform(embeddings)
+    graphical_plot(umap_emb, true_labels, output_url + "_umap.png")
+
+
+# =============================================
+#          Testing functions
+# =============================================
+
+def test_word_clustering(args):
+
+    if "chdzdt" in args.m:
+        print("loading CHDZDT model ...")
+        tokenizer, model = load_chdzdt_model(args.m)
+    elif "canine" in args.m:
+        print("loading Canine model ...")
+        tokenizer, model = load_canine_model(args.m)
+    else:
+        print("loading BERT-like model ...")
+        tokenizer, model = load_bertlike_model(args.m)
+
+    print("loading data ...")
+    Data = get_cluster_data(args.input)
+
+    words       = Data["word"].tolist()
+    true_labels = Data["cluster"].to_numpy()
+
+    if "arabert" in args.m: 
+        print("normalizing using AraBERT ...")
+        words = arabert_preprocess(words, args.m)
+
+    print("encoding words ...")
+    words_cls_emb, words_tok_emb = get_embeddings(words, tokenizer, model)
+    words_cls_emb = words_cls_emb.detach().numpy()
+    words_tok_emb = words_tok_emb.detach().numpy()
+
+ 
+    print("calculating ASR over KMeans ...")
+    cls_ars = get_kmeans_ars(words_cls_emb, true_labels)
+    tok_ars = get_kmeans_ars(words_tok_emb, true_labels)
+
+    print("calculating sil ...")
+    cls_sil = get_silhouette(words_cls_emb, true_labels)
+    tok_sil = get_silhouette(words_tok_emb, true_labels)
+
+    print("calculating average cosine similarity and euclidean distance ...")
+    cls_cos, cls_euc = get_cluster_cos_euc(words_cls_emb, true_labels)
+    tok_cos, tok_euc = get_cluster_cos_euc(words_tok_emb, true_labels)
+
+    print("writing results ...")
+    with open(os.path.expanduser(args.output) + ".txt", "w", encoding="utf8") as out_f:
+
+        out_f.write("\n\nResults:\n")
+        out_f.write("==================================\n")
+        out_f.write("\nembedding\tKMeans+ASR\tSil\tAvg. Cos.\Avg. Euc.\n")
+        out_f.write(f"CLS\t{cls_ars}\t{cls_sil}\t{cls_cos}\t{cls_euc}\n")
+
+        # if "chdzdt" not in args.m:
+        out_f.write(f"Centroid\t{tok_ars}\t{tok_sil}\t{tok_cos}\t{tok_euc}\n")
+
+    print("graphical clustering ...")
+    graphical_clustering(words_cls_emb, true_labels, args.output)
+
+
+def test_word_noise(args):
+
+    if "chdzdt" in args.m:
+        print("loading CHDZDT model ...")
+        tokenizer, model = load_chdzdt_model(args.m)
+    elif "canine" in args.m:
+        print("loading Canine model ...")
+        tokenizer, model = load_canine_model(args.m)
+    else:
+        print("loading BERT-like model ...")
+        tokenizer, model = load_bertlike_model(args.m)
+
+    print("loading data ...")
+    words, ofus1fix, ofus1var = get_noisy_data(args.input)
+
+    if "arabert" in args.m: 
+        print("normalizing using AraBERT ...")
+        words = arabert_preprocess(words, args.m)
+        ofus1fix = arabert_preprocess(ofus1fix, args.m)
+        ofus1var = arabert_preprocess(ofus1var, args.m)
+
+    print("encoding words ...")
+    words_cls_emb, words_tok_emb = get_embeddings(words, tokenizer, model)
+    words_cls_emb = words_cls_emb.detach().numpy()
+    words_tok_emb = words_tok_emb.detach().numpy()
+
+    print("encoding ofus1fix ...")
+    ofus1fix_cls_emb, ofus1fix_tok_emb = get_embeddings(ofus1fix, tokenizer, model)
+    ofus1fix_cls_emb = ofus1fix_cls_emb.detach().numpy()
+    ofus1fix_tok_emb = ofus1fix_tok_emb.detach().numpy()
+
+    print("encoding ofus2fix ...")
+    ofus2fix = [w.replace("*", "#") for w in ofus1fix]  # 
+    ofus2fix_cls_emb, ofus2fix_tok_emb = get_embeddings(ofus2fix, tokenizer, model)
+    ofus2fix_cls_emb = ofus2fix_cls_emb.detach().numpy()
+    ofus2fix_tok_emb = ofus2fix_tok_emb.detach().numpy()
+
+    print("encoding ofus1var ...")
+    ofus1var_cls_emb, ofus1var_tok_emb = get_embeddings(ofus1var, tokenizer, model)
+    ofus1var_cls_emb = ofus1var_cls_emb.detach().numpy()
+    ofus1var_tok_emb = ofus1var_tok_emb.detach().numpy()
+
+    del tokenizer, model, words, ofus1fix, ofus1var, ofus2fix
+
+    print("cosine similarities ...")
+    cls_cos_ofus1fix = cosine_similarity(words_cls_emb, ofus1fix_cls_emb)
+    cls_cos_ofus2fix = cosine_similarity(words_cls_emb, ofus2fix_cls_emb)
+    cls_cos_ofus1var = cosine_similarity(words_cls_emb, ofus1var_cls_emb)
+    tok_cos_ofus1fix = cosine_similarity(words_tok_emb, ofus1fix_tok_emb)
+    tok_cos_ofus2fix = cosine_similarity(words_tok_emb, ofus2fix_tok_emb)   
+    tok_cos_ofus1var = cosine_similarity(words_tok_emb, ofus1var_tok_emb)
+
+    print("writing results ...")
+    with open(os.path.expanduser(args.output) + ".txt", "w", encoding="utf8") as out_f:
+
+        out_f.write("\n\nResults:\n")
+        out_f.write("==================================\n")
+        out_f.write("\nembedding\tfix*\tfix#\tvar\n")
+        out_f.write(f"CLS\t{cls_cos_ofus1fix}\t{cls_cos_ofus2fix}\t{cls_cos_ofus1var}\n")
+        out_f.write(f"Tok\t{tok_cos_ofus1fix}\t{tok_cos_ofus2fix}\t{tok_cos_ofus1var}\n")
+
+# =============================================
+#          Command line parser
+# =============================================     
+
+
+def test_main(args):
+    if args.t == "cluster":
+        test_word_clustering(args)
+    elif args.t == "noise":
+        test_word_noise(args)
+    else:
+        print(f"Unknown task {args.t}.")
+
+parser = argparse.ArgumentParser(description="test morphological clustering using a pre-trained model")
+parser.add_argument("-t", help="task name", default="cluster", choices=["cluster", "noise"])
+parser.add_argument("-m", help="model name/path")
+parser.add_argument("input", help="input clusters' file")
+parser.add_argument("output", help="output txt file containing the results")
+parser.set_defaults(func=test_main)
+
+
+if __name__ == "__main__":
+
+    # argv = sys.argv[1:]
+    # args = parser.parse_args(argv)
+    # # print(args)
+    # # parser.print_help()
+    # args.func(args)
+
+    # d = "en_infl_wr"
+    # src = "~/Data/DZDT/test/morphology/english/"
+    # dst = "~/Data/DZDT/results/morph/en_infl_wr/"
+
+    d = "ar_taboo"
+    src = "~/Data/DZDT/test/lexicon/arabic/"
+    dst = "~/Data/DZDT/results/lexicon/arabic/noise/"
+
+    mdls = [
+        ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
+        ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
+        # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
+        # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
+        # ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
+        # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
+        # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
+        # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
+        ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
+        # ("bert", "google-bert/bert-base-uncased"),
+        # ("flaubert", "flaubert/flaubert_base_uncased"),
+        ("dziribert", "alger-ia/dziribert"),
+        ("caninec", "google/canine-c"),
+    ]
+
+    for s in ["noise"]: #"full", "avg15", "min30"
+        for mdl in mdls:
+            print(f"Testing model {mdl[0]} on data with {d}_{s} clusters ...")
+            argv = [
+                "-t", "noise",
+                "-m", mdl[1],
+                f"{src}{d}_{s}.csv",
+                f"{dst}{d}_{s}_{mdl[0]}"
+                ]
+            args = parser.parse_args(argv)
+            args.func(args)
