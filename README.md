@@ -9,8 +9,7 @@ This makes it well-suited to tasks involving word morphology, such as inflection
 In addition, it can serve as a preprocessing module to enhance traditional language models; particularly in handling out-of-vocabulary (OOV) tokens.
 
 
-This project is a part of a larger project called DzDT started on 2023.
-It was separated on August 2025 to handle only the morphology part of the project.
+**This project is a part of a larger project called DzDT started on 2023. It was separated on August 2025 to handle only the morphology part of the project.**
 
 
 ## License

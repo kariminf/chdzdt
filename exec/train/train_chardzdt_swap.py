@@ -32,7 +32,7 @@ from transformers import BertConfig
 from transformers import Trainer, TrainingArguments
 
 from dzdt.model.chdzdt_tok import DzDtCharTokenizer
-from dzdt.model.modeling_chardzdt      import MLMLMBertModel
+from dzdt.model.chdzdt_mdl      import MLMLMBertModel
 from dzdt.train.datasets       import CSVWordMultiLabel, CSVWordMultiLabelSwap, DatasetSwapTrainerCallback
 from dzdt.train.collectors import DataCollatorForMLMandMLC
 from dzdt.train.trainers import CharBertTrainer
@@ -177,4 +177,4 @@ trainer.train()
 
 print('saving charBERT model')
 
-trainer.save_model(PRJPATH + CHRBERTURL + MDLNAME)
+trainer.save_model(PRJPATH + CHRBERTURL + MDLNAME)from

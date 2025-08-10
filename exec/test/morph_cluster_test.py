@@ -29,9 +29,6 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score
 from sklearn.metrics import silhouette_score
-from transformers import BertTokenizer, BertForMaskedLM, BertModel
-from transformers import AutoTokenizer, AutoModelForMaskedLM
-from transformers import CanineTokenizer, CanineModel
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import umap
@@ -41,153 +38,12 @@ from dzdt.model.chdzdt_tok import CharTokenizer
 from dzdt.tools.const import char_tokenizer_config, word_tokenizer_config
 from dzdt.model.chdzdt_mdl import MLMLMBertModel
 
-# =============================================
-#          Models loading 
-# =============================================
-
-def load_chdzdt_model(plm_loc: str) -> Tuple[CharTokenizer, MLMLMBertModel]:
-    """ Load a CHDZDT model from the specified path.
-    Args:
-        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
-    Returns:
-        Tuple[CharTokenizer, MLMLMBertModel]: A tuple containing the character tokenizer and the model.
-    """
-    plm_loc = os.path.expanduser(plm_loc)
-    # print("loading characters tokenizer")
-    char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pickle"))
-
-    # print("loading characters encoder")
-    char_tokenizer_config()
-    char_encoder = MLMLMBertModel.from_pretrained(plm_loc)
-    word_tokenizer_config()
-
-    return char_tokenizer, char_encoder
-
-def load_bertlike_model(plm_loc: str) -> Tuple[BertTokenizer, BertModel]:
-    """ Load a BERT-like model from the specified path.
-    This function supports models like BERT, RoBERTa, and others that are compatible with the Hugging Face Transformers library.
-    Args:
-        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
-    Returns:
-        Tuple[BertTokenizer, BertModel]: A tuple containing the tokenizer and the model.
-    """
-    plm_loc = os.path.expanduser(plm_loc)
-    tokenizer = AutoTokenizer.from_pretrained(plm_loc)
-    model = AutoModelForMaskedLM.from_pretrained(plm_loc)
-    if isinstance(model, BertModel):
-        return tokenizer, model
-    
-    if hasattr(model, 'base_model'):    
-        return tokenizer, model.base_model
-    
-    return tokenizer, model.bert
-
-def load_canine_model(plm_loc: str) -> Tuple[CanineTokenizer, CanineModel]:
-    """ Load a Canine model from the specified path.
-    Args:
-        plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
-    Returns:
-        Tuple[CanineTokenizer, CanineModel]: A tuple containing the Canine tokenizer and the model.
-    """
-    plm_loc = os.path.expanduser(plm_loc)
-    tokenizer = CanineTokenizer.from_pretrained(plm_loc)
-    model = CanineModel.from_pretrained(plm_loc)
-    if isinstance(model, BertModel):
-        return tokenizer, model
-    
-    if hasattr(model, 'base_model'):    
-        return tokenizer, model.base_model
-    
-    return tokenizer, model.bert 
+from dzdt.extra.plms import arabert_preprocess, load_bertlike_model, load_canine_model, load_chdzdt_model, get_oneword_embeddings
+from dzdt.extra.data import get_word_cluster_data, get_word_noisy_data
+from dzdt.extra.stats import cosine_similarity, kmeans_ars, silhouette, cluster_cos_euc
 
 
 
-def arabert_preprocess(texts: List[str], model_name: str) -> List[str]:
-    from arabert.preprocess import ArabertPreprocessor
-    arabert_prep = ArabertPreprocessor(model_name=model_name)
-    result = []
-    for text in texts: 
-        result.append(arabert_prep.preprocess(text))
-    return result
-
-
-
-
-# =============================================
-#          Data loading and processing
-# =============================================
-
-   
-
-def get_cluster_data(url: str) -> pd.DataFrame:
-    url = os.path.expanduser(url)
-    data = pd.read_csv(url, sep="\t", encoding="utf8")
-    data["word"] = data["word"].astype(str)
-    data["cluster"] = data["cluster"].astype(int)
-    return data
-
-def get_noisy_data(url: str) -> Tuple[List[str], List[str], List[str]]:
-    url = os.path.expanduser(url)
-    data = pd.read_csv(url, sep="\t", encoding="utf8")
-    data = data.astype(str)
-    return (data["word"].tolist(), 
-            data["obfus1fix"].tolist(), 
-            data["obfus1var"].tolist())
-
-
-def get_embeddings(words: List[str], tokenizer: BertTokenizer, bert: BertModel) -> Tuple[torch.Tensor, torch.Tensor]:
-    
-    tokens = tokenizer(words, return_tensors="pt", padding=True, truncation=True, add_special_tokens=True)
-    with torch.no_grad():
-        outputs = bert(**tokens)
-
-    return outputs.last_hidden_state[:, 0, :], outputs.last_hidden_state[:, 1:-1, :].mean(dim=1)
-
-
-# =============================================
-#          Statistical functions 
-# =============================================
-
-def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
-    """Calculate the cosine similarity between two aligned sets of embeddings (row-wise)."""
-    return (np.sum(emb1 * emb2, axis=1) / (np.linalg.norm(emb1, axis=1) * np.linalg.norm(emb2, axis=1))).mean()
-
-# returns adjusted rand score over the clusters
-def get_kmeans_ars(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
-
-    # Perform KMeans clustering
-    kmeans = KMeans(n_clusters=np.unique(true_labels).size, random_state=42)
-    predicted_labels = kmeans.fit_predict(embeddings)
-
-    return adjusted_rand_score(true_labels, predicted_labels)
-
-# returns sillouette
-def get_silhouette(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
-    return silhouette_score(embeddings, true_labels)
-
-# returns average cosine similarity and euclidean distance  #
-# of elements of each cluster with their first element (representative)
-def get_cluster_cos_euc(embeddings: np.ndarray, true_labels: np.ndarray) -> Tuple[float, float]:
-    sim = 0.0
-    euc = 0.0
-
-    current_label = None
-    rep_embedding = None
-
-    for embedding, label in zip(embeddings, true_labels):
-        if current_label != label:                 
-            current_label = label
-            rep_embedding = embedding
-            continue
-
-        sim += np.dot(embedding, rep_embedding) / (np.linalg.norm(embedding) * np.linalg.norm(rep_embedding))
-        euc += np.linalg.norm(embedding - rep_embedding)
-
-    #  TODO you can add Box plot of similarity and distance 
-
-    nbr = len(true_labels) - len(np.unique(true_labels))
-
-    return sim/nbr, euc/nbr
 
 def graphical_plot(xy: np.ndarray, labels: np.ndarray, output_url: str):
     plt.figure(figsize=(10, 10))
@@ -235,7 +91,7 @@ def test_word_clustering(args):
         tokenizer, model = load_bertlike_model(args.m)
 
     print("loading data ...")
-    Data = get_cluster_data(args.input)
+    Data = get_word_cluster_data(args.input)
 
     words       = Data["word"].tolist()
     true_labels = Data["cluster"].to_numpy()
@@ -245,22 +101,22 @@ def test_word_clustering(args):
         words = arabert_preprocess(words, args.m)
 
     print("encoding words ...")
-    words_cls_emb, words_tok_emb = get_embeddings(words, tokenizer, model)
+    words_cls_emb, words_tok_emb = get_oneword_embeddings(words, tokenizer, model)
     words_cls_emb = words_cls_emb.detach().numpy()
     words_tok_emb = words_tok_emb.detach().numpy()
 
  
     print("calculating ASR over KMeans ...")
-    cls_ars = get_kmeans_ars(words_cls_emb, true_labels)
-    tok_ars = get_kmeans_ars(words_tok_emb, true_labels)
+    cls_ars = kmeans_ars(words_cls_emb, true_labels)
+    tok_ars = kmeans_ars(words_tok_emb, true_labels)
 
     print("calculating sil ...")
-    cls_sil = get_silhouette(words_cls_emb, true_labels)
-    tok_sil = get_silhouette(words_tok_emb, true_labels)
+    cls_sil = silhouette(words_cls_emb, true_labels)
+    tok_sil = silhouette(words_tok_emb, true_labels)
 
     print("calculating average cosine similarity and euclidean distance ...")
-    cls_cos, cls_euc = get_cluster_cos_euc(words_cls_emb, true_labels)
-    tok_cos, tok_euc = get_cluster_cos_euc(words_tok_emb, true_labels)
+    cls_cos, cls_euc = cluster_cos_euc(words_cls_emb, true_labels)
+    tok_cos, tok_euc = cluster_cos_euc(words_tok_emb, true_labels)
 
     print("writing results ...")
     with open(os.path.expanduser(args.output) + ".txt", "w", encoding="utf8") as out_f:
@@ -290,7 +146,7 @@ def test_word_noise(args):
         tokenizer, model = load_bertlike_model(args.m)
 
     print("loading data ...")
-    words, ofus1fix, ofus1var = get_noisy_data(args.input)
+    words, ofus1fix, ofus1var = get_word_noisy_data(args.input)
 
     if "arabert" in args.m: 
         print("normalizing using AraBERT ...")
@@ -299,23 +155,23 @@ def test_word_noise(args):
         ofus1var = arabert_preprocess(ofus1var, args.m)
 
     print("encoding words ...")
-    words_cls_emb, words_tok_emb = get_embeddings(words, tokenizer, model)
+    words_cls_emb, words_tok_emb = get_oneword_embeddings(words, tokenizer, model)
     words_cls_emb = words_cls_emb.detach().numpy()
     words_tok_emb = words_tok_emb.detach().numpy()
 
     print("encoding ofus1fix ...")
-    ofus1fix_cls_emb, ofus1fix_tok_emb = get_embeddings(ofus1fix, tokenizer, model)
+    ofus1fix_cls_emb, ofus1fix_tok_emb = get_oneword_embeddings(ofus1fix, tokenizer, model)
     ofus1fix_cls_emb = ofus1fix_cls_emb.detach().numpy()
     ofus1fix_tok_emb = ofus1fix_tok_emb.detach().numpy()
 
     print("encoding ofus2fix ...")
     ofus2fix = [w.replace("*", "#") for w in ofus1fix]  # 
-    ofus2fix_cls_emb, ofus2fix_tok_emb = get_embeddings(ofus2fix, tokenizer, model)
+    ofus2fix_cls_emb, ofus2fix_tok_emb = get_oneword_embeddings(ofus2fix, tokenizer, model)
     ofus2fix_cls_emb = ofus2fix_cls_emb.detach().numpy()
     ofus2fix_tok_emb = ofus2fix_tok_emb.detach().numpy()
 
     print("encoding ofus1var ...")
-    ofus1var_cls_emb, ofus1var_tok_emb = get_embeddings(ofus1var, tokenizer, model)
+    ofus1var_cls_emb, ofus1var_tok_emb = get_oneword_embeddings(ofus1var, tokenizer, model)
     ofus1var_cls_emb = ofus1var_cls_emb.detach().numpy()
     ofus1var_tok_emb = ofus1var_tok_emb.detach().numpy()
 
