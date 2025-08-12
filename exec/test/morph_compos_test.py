@@ -31,7 +31,12 @@ import umap
 import numpy as np
 from typing import List, Tuple
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 from sklearn.linear_model import LinearRegression, RidgeCV
+from sklearn.decomposition import PCA
+import joblib 
 
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -39,6 +44,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from dzdt.extra.plms import arabert_preprocess, load_bertlike_model, load_canine_model, load_chdzdt_model, get_oneword_embeddings
 from dzdt.extra.data import get_csv_string_data
 from dzdt.extra.stats import cosine_similarity, euclidean
+from dzdt.extra.math import log_scaling
+
+# =======================================================================
+#    Testing simple compositions
+# =======================================================================
 
 
 def test_additive_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> Tuple[float, float]:
@@ -46,15 +56,14 @@ def test_additive_composition(w: np.array, p: np.array, r: np.array, s: np.array
 
     return cosine_similarity(w, w_comp), euclidean(w, w_comp)
 
-def test_weighted_additive_composition(w: np.array, 
-                                       p: np.array, 
-                                       r: np.array, 
-                                       s: np.array, 
-                                       abg: Tuple[float, float, float]) -> Tuple[float, float]:
-    w_comp = (abg[0] * p) + (abg[1] * r) + (abg[2] * s)
+def test_multiplicative_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> Tuple[float, float]:
+    w_comp = p * r * s
 
     return cosine_similarity(w, w_comp), euclidean(w, w_comp)
 
+# =======================================================================
+#    Teraining weighted compositions
+# =======================================================================
 
 def train_weighted_additive_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> Tuple[float, float, float]:
     N, d = p.shape
@@ -70,6 +79,33 @@ def train_weighted_additive_composition(w: np.array, p: np.array, r: np.array, s
 
     return reg.coef_
 
+
+def train_weighted_multiplicative_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> Tuple[float, float, float]:
+    N, d = p.shape
+
+    Xp_log, Xr_log, Xs_log, Y_log = log_scaling(p), log_scaling(r), log_scaling(s), log_scaling(w)
+
+    X_stack = np.zeros((N * d, 3))
+    X_stack[:, 0] = Xp_log.reshape(-1)
+    X_stack[:, 1] = Xr_log.reshape(-1)
+    X_stack[:, 2] = Xs_log.reshape(-1)
+
+    Y_flat = Y_log.reshape(-1)
+    reg = LinearRegression(fit_intercept=False)
+    reg.fit(X_stack, Y_flat)
+
+    return reg.coef_
+
+def train_lin_map_sum_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> RidgeCV:
+    X = p + r + s
+
+    alphas = np.logspace(-6, 3, 10)
+    reg = RidgeCV(alphas=alphas, cv=5, fit_intercept=False)
+    reg.fit(X, w)
+
+    return reg
+
+
 def train_lin_map_concat_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> RidgeCV:
     X = np.hstack([p, r, s])
 
@@ -78,6 +114,42 @@ def train_lin_map_concat_composition(w: np.array, p: np.array, r: np.array, s: n
     reg.fit(X, w)
 
     return reg
+
+# =======================================================================
+#    Testing weighted compositions
+# =======================================================================
+
+def test_weighted_additive_composition(w: np.array, 
+                                       p: np.array, 
+                                       r: np.array, 
+                                       s: np.array, 
+                                       abg: Tuple[float, float, float]) -> Tuple[float, float]:
+    w_comp = (abg[0] * p) + (abg[1] * r) + (abg[2] * s)
+
+    return cosine_similarity(w, w_comp), euclidean(w, w_comp)
+
+
+def test_weighted_multiplicative_composition(w: np.array, 
+                                            p: np.array, 
+                                            r: np.array, 
+                                            s: np.array, 
+                                            abg: Tuple[float, float, float]) -> Tuple[float, float]:
+    
+    w_comp = abg[0] * log_scaling(p) 
+    w_comp += abg[1] * log_scaling(r) 
+    w_comp += abg[2] * log_scaling(s)
+    w_comp = np.exp(w_comp)
+
+    return cosine_similarity(w, w_comp), euclidean(w, w_comp)
+
+def test_lin_map_sum_composition(w: np.array, 
+                                    p: np.array, 
+                                    r: np.array, 
+                                    s: np.array, 
+                                    mdl: RidgeCV) -> Tuple[float, float]:
+    w_comp = mdl.predict(p + r + s)
+
+    return cosine_similarity(w, w_comp), euclidean(w, w_comp)
 
 def test_lin_map_concat_composition(w: np.array, 
                                     p: np.array, 
@@ -88,10 +160,9 @@ def test_lin_map_concat_composition(w: np.array,
 
     return cosine_similarity(w, w_comp), euclidean(w, w_comp)
 
-def test_multiplicative_composition(w: np.array, p: np.array, r: np.array, s: np.array) -> Tuple[float, float]:
-    w_comp = p * r * s
-
-    return cosine_similarity(w, w_comp), euclidean(w, w_comp)
+# =======================================================================
+#    Helper functions
+# =======================================================================
 
 def load_encode_data(url, tokenizer, model, arabert=False):
     print("loading data ...")
@@ -133,7 +204,9 @@ def train_trainable(args, tokenizer, model):
         s = data[enc]["suffix"]
         weights[enc] = {}
         weights[enc]["wadd"] = train_weighted_additive_composition(w, p, r, s)
+        weights[enc]["wmul"] = train_weighted_multiplicative_composition(w, p, r, s)
         weights[enc]["mapconcat"] = train_lin_map_concat_composition(w, p, r, s)
+        weights[enc]["mapsum"] = train_lin_map_sum_composition(w, p, r, s)
     return weights
 
 def plot_weights(mdl: RidgeCV, url: str):
@@ -153,6 +226,75 @@ def plot_weights(mdl: RidgeCV, url: str):
     ax.set_ylabel("Output dimensions")
     fig.colorbar(im, ax=ax, label="Weight value")
 
+    plt.savefig(url)
+    plt.close()  
+
+
+def plot_weights1(mdl: RidgeCV, url: str):
+
+    W = mdl.coef_
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    im = ax.imshow(W, aspect='auto', cmap='coolwarm', interpolation='nearest')
+
+    ax.set_title(r"Weight matrix")
+    ax.set_xlabel("Input dimensions")
+    ax.set_ylabel("Output dimensions")
+    fig.colorbar(im, ax=ax, label="Weight value")
+
+    plt.savefig(url)
+    plt.close()  
+
+def reduce_block_2d(W_block, n_row=20, n_col=20):
+    Wc = W_block - W_block.mean(axis=0, keepdims=True)
+    pca_row = PCA(n_components=n_row)
+    R = pca_row.fit_transform(Wc)
+    pca_col = PCA(n_components=n_col)
+    C = pca_col.fit_transform(R.T)
+    return C
+
+def plot_reduced_weights(mdl: RidgeCV, url: str, rd=20):
+
+    W = mdl.coef_
+
+    d = W.shape[0]
+
+    W_p = W[:, :d]; W_r = W[:, d:2*d]; W_s = W[:, 2*d:]
+
+    C_p = reduce_block_2d(W_p, n_row=rd, n_col=rd)
+    C_r = reduce_block_2d(W_r, n_row=rd, n_col=rd)
+    C_s = reduce_block_2d(W_s, n_row=rd, n_col=rd)
+
+    # concatenate horizontally
+    W_small = np.hstack([C_p, C_r, C_s])
+
+    # single common color scale across models: choose vmin/vmax from W_small or multiple models
+    vmin, vmax = W_small.min(), W_small.max()
+
+    plt.figure(figsize=(12,4))
+    plt.imshow(W_small, aspect='auto', cmap='coolwarm', vmin=vmin, vmax=vmax)
+    plt.axvline(rd - 0.5, color='k', lw=1)
+    plt.axvline(2 * rd - 0.5, color='k', lw=1)
+    plt.title(f'PCA-reduced blocks: [W_p ({rd}x{rd}) | W_r ({rd}x{rd}) | W_s ({rd}x{rd})]')
+    plt.xlabel('Reduced input components (prefix | root | suffix)')
+    plt.ylabel('Reduced output components')
+    plt.colorbar(label='PCA-reduced weight value')
+    plt.tight_layout()
+    plt.savefig(url)
+    plt.close()  
+
+def plot_reduced_weights1(mdl: RidgeCV, url: str, rd=20):
+
+    C = reduce_block_2d(mdl.coef_, n_row=rd, n_col=rd)
+
+    plt.figure(figsize=(6, 6))
+    plt.imshow(C, aspect='auto', cmap='coolwarm')
+
+    plt.title(f'PCA-reduced weights')
+    plt.xlabel('Reduced input components')
+    plt.ylabel('Reduced output components')
+    plt.colorbar(label='PCA-reduced weight value')
+    plt.tight_layout()
     plt.savefig(url)
     plt.close()  
 
@@ -204,8 +346,12 @@ def test_word_composition(args):
         results[emb_type]["mul"] = [cos, euc]
         cos, euc = test_weighted_additive_composition(emb["word"], emb["prefix"], emb["root"], emb["suffix"], weights[emb_type]["wadd"])
         results[emb_type]["wadd"] = [cos, euc]
+        cos, euc = test_weighted_multiplicative_composition(emb["word"], emb["prefix"], emb["root"], emb["suffix"], weights[emb_type]["wmul"])
+        results[emb_type]["wmul"] = [cos, euc]
         cos, euc = test_lin_map_concat_composition(emb["word"], emb["prefix"], emb["root"], emb["suffix"], weights[emb_type]["mapconcat"])
         results[emb_type]["mapconcat"] = [cos, euc]
+        cos, euc = test_lin_map_sum_composition(emb["word"], emb["prefix"], emb["root"], emb["suffix"], weights[emb_type]["mapsum"])
+        results[emb_type]["mapsum"] = [cos, euc]
 
 
     output: str = os.path.expanduser(args.output)
@@ -213,13 +359,29 @@ def test_word_composition(args):
     plot_weights(weights["cls"]["mapconcat"], output.replace(".txt", "_cls_mapconcat.png"))
     plot_weights(weights["tok"]["mapconcat"], output.replace(".txt", "_tok_mapconcat.png"))
 
-    fro_p, fro_r, fro_s = frobenius_norms(weights["cls"]["mapconcat"])
+    plot_weights1(weights["cls"]["mapsum"], output.replace(".txt", "_cls_mapsum.png"))
+    plot_weights1(weights["tok"]["mapsum"], output.replace(".txt", "_tok_mapsum.png"))
+
+    plot_reduced_weights(weights["cls"]["mapconcat"], output.replace(".txt", "_cls_mapconcat_pca.png"))
+    plot_reduced_weights(weights["tok"]["mapconcat"], output.replace(".txt", "_tok_mapconcat_pca.png"))
+
+    plot_reduced_weights1(weights["cls"]["mapsum"], output.replace(".txt", "_cls_mapsum_pca.png"))
+    plot_reduced_weights1(weights["tok"]["mapsum"], output.replace(".txt", "_tok_mapsum_pca.png"))
+
+    joblib.dump(weights["cls"]["mapconcat"], output.replace(".txt", "_cls_mapconcat.pkl"))
+    joblib.dump(weights["tok"]["mapconcat"], output.replace(".txt", "_tok_mapconcat.pkl"))
+
+    joblib.dump(weights["cls"]["mapsum"], output.replace(".txt", "_cls_mapsum.pkl"))
+    joblib.dump(weights["tok"]["mapsum"], output.replace(".txt", "_tok_mapsum.pkl"))
+
+    comps = ["add", "mul", "wadd", "wmul", "mapconcat", "mapsum"]
+    
 
     with open(output, "w", encoding="utf8") as f:
         f.write(f"Testing composition for model {args.m}\n\n\n")
         f.write("comp\tcls\t\ttok\t\n")
         f.write("\tcos\teuc\tcos\teuc\n")
-        for comp in ["add", "mul", "wadd", "mapconcat"]: #  
+        for comp in comps: #  
             f.write(f"{comp}")
             for enc in ["cls", "tok"]:
                 f.write(f"\t{results[enc][comp][0]}\t{results[enc][comp][1]}")
@@ -232,8 +394,24 @@ def test_word_composition(args):
         f.write(f"weights tok = {str(w_tok)}\n")
 
         f.write("\n\n")
+        w_cls, w_tok = weights["cls"]["wmul"], weights["tok"]["wmul"]
+        f.write("Weighted multiplication\n")
+        f.write(f"weights cls = {str(w_cls)}\n")
+        f.write(f"weights tok = {str(w_tok)}\n")
+
+        f.write("\n\n")
         f.write("Map concat\n")
-        f.write(f"{fro_p}, {fro_r}, {fro_s}\n")
+        fro_p, fro_r, fro_s = frobenius_norms(weights["cls"]["mapconcat"])
+        f.write(f"frobenius_cls = {fro_p}, {fro_r}, {fro_s}\n")
+        fro_p, fro_r, fro_s = frobenius_norms(weights["tok"]["mapconcat"])
+        f.write(f"frobenius_tok = {fro_p}, {fro_r}, {fro_s}\n")
+
+        f.write("\n\n")
+        f.write("Map sum\n")
+        fro_p, fro_r, fro_s = frobenius_norms(weights["cls"]["mapsum"])
+        f.write(f"frobenius_cls = {fro_p}, {fro_r}, {fro_s}\n")
+        fro_p, fro_r, fro_s = frobenius_norms(weights["tok"]["mapsum"])
+        f.write(f"frobenius_tok = {fro_p}, {fro_r}, {fro_s}\n")
 
 
 
@@ -273,8 +451,8 @@ if __name__ == "__main__":
 
     mdls = [
         ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
-        ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
         # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
         # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
@@ -284,9 +462,9 @@ if __name__ == "__main__":
         # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
         # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
-        ("flaubert", "flaubert/flaubert_base_uncased"),
-        ("dziribert", "alger-ia/dziribert"),
-        ("caninec", "google/canine-c"),
+        # ("flaubert", "flaubert/flaubert_base_uncased"),
+        # ("dziribert", "alger-ia/dziribert"),
+        # ("caninec", "google/canine-c"),
     ]
 
     for mdl in mdls:

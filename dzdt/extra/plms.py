@@ -115,3 +115,96 @@ def get_oneword_embeddings(words: List[str],
         emb_cls, emb_tok = emb_cls.detach().numpy(), emb_tok.detach().numpy()
 
     return emb_cls, emb_tok
+
+
+def get_sent_embeddings(sentences: List[str], tokenizer: BertTokenizer, bert: BertModel, device=None):
+
+    # this gives the user the choice to use a device implicitly or explicitly
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    bert.to(device)
+    bert.eval()
+
+    tokens = tokenizer(sentences, 
+                       return_tensors="pt", 
+                       padding=True, 
+                       truncation=True, 
+                       add_special_tokens=True
+                       ).to(device)
+    with torch.no_grad():
+        outputs = bert(**tokens)
+
+    return outputs.last_hidden_state[:, 0, :]
+
+def get_sent_seq_embeddings0(sentences: List[str], tokenizer: BertTokenizer, encoder: BertModel, max_words=None):
+
+    if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
+        emb_d = encoder.config.hidden_size
+    elif hasattr(encoder, "hidden_size"):
+        emb_d = encoder.hidden_size
+    elif hasattr(encoder, "d_model"):
+        emb_d = encoder.d_model
+    else:
+        raise AttributeError("Cannot determine embedding dimension from encoder/model.")
+
+    result = []
+
+    for sent in sentences:
+        sent_words = sent.split()
+        if (max_words is not None) and (len(sent_words) > max_words):
+            sent_words = sent_words[:max_words]
+    
+        tokens = tokenizer(sent_words, 
+                           return_tensors="pt", 
+                           padding=True, 
+                           truncation=True, 
+                           add_special_tokens=True
+                           )
+
+        with torch.no_grad():
+            outputs = encoder(**tokens)
+        sent_enc = outputs.last_hidden_state[:, 0, :]
+        if (max_words is not None) and (len(sent_words) < max_words):
+            padding = torch.zeros((max_words - len(sent_words), emb_d))
+            sent_enc = torch.concat([sent_enc, padding])
+        
+        result.append(sent_enc)
+
+    return torch.stack(result)
+
+def get_sent_seq_embeddings(sentences: List[str], tokenizer: BertTokenizer, encoder: BertModel, max_words=None):
+
+    # if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
+    #     emb_d = encoder.config.hidden_size
+    # elif hasattr(encoder, "hidden_size"):
+    #     emb_d = encoder.hidden_size
+    # elif hasattr(encoder, "d_model"):
+    #     emb_d = encoder.d_model
+    # else:
+    #     raise AttributeError("Cannot determine embedding dimension from encoder/model.")
+
+    result = []
+
+    for sent in sentences:
+        sent_words = sent.split()
+        l = len(sent_words)
+        if max_words is not None and l != max_words:
+            if l > max_words:
+                sent_words = sent_words[:max_words]
+            else:
+                sent_words = sent_words + [""] * (max_words - l)
+    
+        tokens = tokenizer(sent_words, 
+                           return_tensors="pt", 
+                           padding=True, 
+                           truncation=True, 
+                           add_special_tokens=True
+                           )
+
+        with torch.no_grad():
+            outputs = encoder(**tokens)
+        sent_enc = outputs.last_hidden_state[:, 0, :]
+        result.append(sent_enc)
+
+    return torch.stack(result)
