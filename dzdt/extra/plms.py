@@ -117,7 +117,20 @@ def get_oneword_embeddings(words: List[str],
     return emb_cls, emb_tok
 
 
-def get_sent_embeddings(sentences: List[str], tokenizer: BertTokenizer, bert: BertModel, device=None):
+def get_sent_embeddings(sentences: List[str], tokenizer: BertTokenizer, bert: BertModel):
+
+    tokens = tokenizer(sentences, 
+                       return_tensors="pt", 
+                       padding=True, 
+                       truncation=True, 
+                       add_special_tokens=True
+                       )
+    with torch.no_grad():
+        outputs = bert(**tokens)
+
+    return outputs.last_hidden_state[:, 0, :]
+
+def get_sent_embeddings_cuda(sentences: List[str], tokenizer: BertTokenizer, bert: BertModel, device=None):
 
     # this gives the user the choice to use a device implicitly or explicitly
     if device is None:
@@ -173,7 +186,7 @@ def get_sent_seq_embeddings0(sentences: List[str], tokenizer: BertTokenizer, enc
 
     return torch.stack(result)
 
-def get_sent_seq_embeddings(sentences: List[str], tokenizer: BertTokenizer, encoder: BertModel, max_words=None):
+def get_sent_seq_embeddings(sentences: List[str], tokenizer: BertTokenizer, encoder: BertModel, max_words=30):
 
     # if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
     #     emb_d = encoder.config.hidden_size
@@ -208,3 +221,54 @@ def get_sent_seq_embeddings(sentences: List[str], tokenizer: BertTokenizer, enco
         result.append(sent_enc)
 
     return torch.stack(result)
+
+
+class AraBertTokenizer:
+    def __init__(self, tokenizer, araberturl):
+        self.tokenizer = tokenizer
+        self.araberturl = araberturl
+
+    def __call__(self, text, **kwds):
+        text = arabert_preprocess(text, self.araberturl)
+        return self.tokenizer(text, **kwds)
+    
+
+def load_model(url):
+    if "chdzdt" in url:
+        print("loading CHDZDT model ...")
+        tokenizer, model = load_chdzdt_model(url)
+    elif "canine" in url:
+        print("loading Canine model ...")
+        tokenizer, model = load_canine_model(url)
+    else:
+        print("loading BERT-like model ...")
+        tokenizer, model = load_bertlike_model(url)
+
+        if "arabert" in url: 
+            print("adding AraBERT normalization ...")
+            tokenizer = AraBertTokenizer(tokenizer, url)
+
+    return tokenizer, model
+
+
+# class DualTokenizer:
+#     def __init__(self, char_tokenizer, word_tokenizer):
+#         self.char_tokenizer = char_tokenizer
+#         self.word_tokenizer = word_tokenizer
+
+#     def __call__(self, text, **kwds):
+#         return {
+#             "char_tokens": self.char_tokenizer(text, **kwds), 
+#             "word_tokens": self.word_tokenizer(text, **kwds)
+#             }
+    
+# class DualEncoder:
+#     def __init__(self, seq_encoder, seq_sent_encoder, bert_encoder):
+#         self.seq_encoder = seq_encoder
+#         self.bert_encoder = bert_encoder
+#         self.seq_sent_encoder = seq_sent_encoder
+
+#     def __call__(self, char_tokens, word_tokens):
+#         seq_encoding = self.seq_encoder()
+
+#         return self.tokenizer1(text, **kwds), self.tokenizer2(text, **kwds)
