@@ -31,21 +31,21 @@ import pandas as pd
 
 def get_word_cluster_data(url: str) -> pd.DataFrame:
     url = os.path.expanduser(url)
-    data = pd.read_csv(url, sep="\t", encoding="utf8")
+    data = pd.read_csv(url, sep="\t", encoding="utf8", keep_default_na=False, na_values=[])
     data["word"] = data["word"].astype(str)
     data["cluster"] = data["cluster"].astype(int)
     return data
 
 def get_csv_string_data(url: str, sep="\t") -> pd.DataFrame:
     url = os.path.expanduser(url)
-    data = pd.read_csv(url, sep=sep, encoding="utf8")
+    data = pd.read_csv(url, sep=sep, encoding="utf8", keep_default_na=False, na_values=[])
     data = data.astype(str)
     return data
 
 
 def get_word_noisy_data(url: str) -> Tuple[List[str], List[str], List[str]]:
     url = os.path.expanduser(url)
-    data = pd.read_csv(url, sep="\t", encoding="utf8")
+    data = pd.read_csv(url, sep="\t", encoding="utf8", keep_default_na=False, na_values=[])
     data = data.astype(str)
     return (data["word"].tolist(), 
             data["obfus1fix"].tolist(), 

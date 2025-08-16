@@ -116,6 +116,22 @@ def get_oneword_embeddings(words: List[str],
 
     return emb_cls, emb_tok
 
+def get_oneword_embeddings_cuda(words: List[str], 
+                           tokenizer: BertTokenizer, 
+                           bert: BertModel,
+                           device=None) -> Tuple[torch.Tensor, torch.Tensor]:
+    
+    tokens = tokenizer(words, return_tensors="pt", padding=True, truncation=True, add_special_tokens=True)
+    tokens = {k: v.to(device) for k, v in tokens.items()}
+    if bert.device != device:
+        bert.to(device)
+    with torch.no_grad():
+        outputs = bert(**tokens)
+
+    emb_cls, emb_tok = outputs.last_hidden_state[:, 0, :], outputs.last_hidden_state[:, 1:-1, :].mean(dim=1)
+
+    return emb_cls, emb_tok
+
 
 def get_sent_embeddings(sentences: List[str], tokenizer: BertTokenizer, bert: BertModel):
 

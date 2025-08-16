@@ -22,6 +22,14 @@
 
 import os
 from typing import Iterator
+import requests
+from pathlib import Path
+
+CACHE_DIR = Path.home() / ".dzdt_cache"
+
+SUPPLIERS = {
+    "hagginface": "https://huggingface.co/{model}/blob/main/{file}"
+}
 
 
 def read_filelines(url: str) -> Iterator[str]:
@@ -49,3 +57,50 @@ def list_files(url: str, suffix=None) -> Iterator[str]:
             ((suffix is None) or (file.endswith(suffix)))
             ):
             yield file
+
+
+class HubMixin:
+
+    @classmethod
+    def load_from_hub(cls, supplier: str, model: str, variant: str, force_download=False, **kwargs):
+        """
+        Generic loader that checks local cache or downloads.
+        """
+        cache_path = cls.CACHE_DIR / supplier / model.replace("/", "_") / variant
+        cache_path.mkdir(parents=True, exist_ok=True)
+
+        # expected files
+        required_files = cls.required_files()
+        local_files = {fname: cache_path / fname for fname in required_files}
+
+        # download if missing or forced
+        if force_download or not all(p.exists() for p in local_files.values()):
+            print(f"Downloading {cls.__name__} from {supplier}/{model}/{variant} ...")
+            cls._download_files(supplier, model, variant, local_files)
+
+        print(f"Loaded {cls.__name__} from cache:", cache_path)
+        return cls._load_from_files(local_files, **kwargs)
+
+    # ---- methods subclasses must implement ----
+    @classmethod
+    def required_files(cls):
+        """Return list of required filenames for this resource."""
+        raise NotImplementedError
+
+    @classmethod
+    def _load_from_files(cls, local_files, **kwargs):
+        """Load object(s) from cached files."""
+        raise NotImplementedError
+
+    # ---- generic download method (can be overridden) ----
+    @classmethod
+    def _download_files(cls, supplier, model, local_files):
+        url_pattern = cls.SUPPLIERS[supplier]
+
+        for fname, path in local_files.items():
+            url = url_pattern.format(model=model, file=fname)
+            print(f"Downloading {url} → {path}")
+            r = requests.get(url)
+            r.raise_for_status()
+            with open(path, "wb") as f:
+                f.write(r.content)

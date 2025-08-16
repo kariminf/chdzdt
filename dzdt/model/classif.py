@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List, Tuple
+from torch.utils.data import Dataset
+import numpy as np
 
 
 class SaveableModel:
@@ -90,6 +93,54 @@ class TokenSimpleClassifier(SaveableModel, nn.Module):
     
     def predict(self, x):
         return F.softmax(self.forward(x))
+    
+# ---------- Dataset ----------
+class MultipleOutputDataset(Dataset):
+    def __init__(self, embeddings: torch.tensor, multiple_labels: List[np.array]):
+        self.embeddings = embeddings
+        self.multiple_labels = multiple_labels
+    def __len__(self):
+        return len(self.embeddings)
+    def __getitem__(self, idx):
+        emb = self.embeddings[idx]
+        labels = [v[idx] for v in self.multiple_labels]
+        return (emb, *labels)
+    
+class MultipleOutputClassifier(SaveableModel, nn.Module):
+    def __init__(self, shared_params: List[Tuple[str, List[str]]], output_classes):
+        super().__init__()
+        self.params = dict(
+            shared_params=shared_params,
+            output_classes=output_classes
+        )
+
+        self.shared = nn.ModuleList(
+            [nn.Linear(shared_params["input_dim"], shared_params["hidden_dim"])] +
+            [nn.Linear(shared_params["hidden_dim"], shared_params["hidden_dim"]) for _ in range(shared_params["hid_layers"] - 1)]
+        )
+        self.dropout = nn.Dropout(shared_params["dropout"])
+
+        outputs = []
+
+        for _, out_values in output_classes:
+            out_nbr = len(out_values)
+            out_nbr = 1 if (out_nbr == 2) else out_nbr
+            outputs.append(nn.Linear(shared_params["hidden_dim"], out_nbr))
+            
+
+        self.outputs = nn.ModuleList(outputs)
+
+    def forward(self, x):
+        out = x
+        for layer in self.shared:
+            out = F.relu(layer(out))
+            out = self.dropout(out)
+        output = {}
+        for out_layer, (name, _) in zip(self.outputs, self.params["output_classes"]):
+            output[name] = out_layer(out)
+
+        return output
+    
 
 
 # --- Example usage ---

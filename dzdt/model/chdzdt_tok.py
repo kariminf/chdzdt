@@ -66,6 +66,38 @@ class CharTokenizer(CharManager): #, Model
 
     def __call__(self, words: Union[str, List[str]], add_cls = True, add_sep=True, return_tensors=None, **kwargs) -> object:
         return self.encode_words(words, add_cls=add_cls, add_sep=add_sep, return_tensors=return_tensors)
+    
+    def state_dict(self):
+        """Return serializable attributes only (not methods)."""
+        return {
+            "max_position": self.max_position,
+            "special": self.special,
+            "pad": self.pad,
+            "unk": self.unk,
+            "sep": self.sep,
+            "cls": self.cls,
+            "mask": self.mask,
+            "size": self.size,
+            "charsets_base": self.charsets_base,
+            "chars_base": self.chars_base,
+            "charsets": self.charsets,
+            "chars": self.chars
+        }
+
+    def load_state_dict(self, state: dict):
+        """Restore attributes from a saved dict."""
+        self.max_position = state["max_position"]
+        self.special = state["special"]
+        self.pad = state["pad"]
+        self.unk = state["unk"]
+        self.sep = state["sep"]
+        self.cls = state["cls"]
+        self.mask = state["mask"]
+        self.size = state["size"]
+        self.charsets_base = state["charsets_base"]
+        self.chars_base = state["chars_base"]
+        self.charsets = state["charsets"]
+        self.chars = state["chars"]
 
     # Override CharManager 
     # ====================
@@ -188,16 +220,28 @@ class CharTokenizer(CharManager): #, Model
         return list(map(lambda w: self.decode_word(w[0][1:w[1]+1]), zip(words_code, sizes)))
     
     @staticmethod
-    def load(url: str) -> "CharTokenizer":
+    def load_old(url: str) -> "CharTokenizer":
         result = None
         with open(url, "rb") as f:
             result = pickle.load(f)
 
         return result
     
-    def save(self, url: str):
+    def save_old(self, url: str):
         with open(url, "wb") as f:
             pickle.dump(self, f)
+
+    def save(self, path: str):
+        with open(path, "wb") as f:
+            pickle.dump(self.state_dict(), f)
+
+    @classmethod
+    def load(cls, path: str) -> "CharTokenizer":
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+        tok = cls(max_position=state.get("max_position", 20))
+        tok.load_state_dict(state)
+        return tok
     
     def tokenize(self, sequence):
         if " " in sequence:
