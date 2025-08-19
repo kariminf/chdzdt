@@ -45,7 +45,7 @@ def load_chdzdt_model(plm_loc: str) -> Tuple[CharTokenizer, MLMLMBertModel]:
     """
     plm_loc = os.path.expanduser(plm_loc)
     # print("loading characters tokenizer")
-    char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pickle"))
+    char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pkl"))
 
     # print("loading characters encoder")
     char_tokenizer_config()

@@ -24,12 +24,7 @@ import os
 from typing import Iterator
 import requests
 from pathlib import Path
-
-CACHE_DIR = Path.home() / ".dzdt_cache"
-
-SUPPLIERS = {
-    "hagginface": "https://huggingface.co/{model}/blob/main/{file}"
-}
+from typing import Dict, List
 
 
 def read_filelines(url: str) -> Iterator[str]:
@@ -61,31 +56,41 @@ def list_files(url: str, suffix=None) -> Iterator[str]:
 
 class HubMixin:
 
+    # added here in case the class defines another cache location
+    CACHE_DIR = Path.home() / ".cache" / "dzdt_hub"
+
+    # added here in case the class adds new providers
+    PROVIDERS = {
+        "hagginface": "https://huggingface.co/{model}/resolve/main/{file}?download=true",
+        "github": "https://github.com/{model}/releases/download/{file}", # file = tag/file_name
+    }
+
+    # the class must define this: provider: list of files
+    variants: Dict[str, List[str]] = {}
+
     @classmethod
-    def load_from_hub(cls, supplier: str, model: str, variant: str, force_download=False, **kwargs):
+    def load_from_hub(cls, model: str, variant: str, provider: str="hagginface", force_download=False, **kwargs):
         """
         Generic loader that checks local cache or downloads.
         """
-        cache_path = cls.CACHE_DIR / supplier / model.replace("/", "_") / variant
+        if provider not in cls.PROVIDERS:
+            raise ValueError(f"the provider '{provider}' not found. Available: {list(cls.PROVIDERS.keys())}")
+        if variant not in cls.variants:
+            raise ValueError(f"Variant '{variant}' not found. Available: {list(cls.variants.keys())}")
+
+        cache_path = cls.CACHE_DIR / provider / model.replace("/", "_") / variant
         cache_path.mkdir(parents=True, exist_ok=True)
 
         # expected files
-        required_files = cls.required_files()
-        local_files = {fname: cache_path / fname for fname in required_files}
+        local_files = {fname: cache_path / fname for fname in cls.variants[variant]}
 
         # download if missing or forced
         if force_download or not all(p.exists() for p in local_files.values()):
-            print(f"Downloading {cls.__name__} from {supplier}/{model}/{variant} ...")
-            cls._download_files(supplier, model, variant, local_files)
+            print(f"Downloading {provider}/{model}/{variant} ...")
+            cls._download_files(provider, model, local_files)
 
         print(f"Loaded {cls.__name__} from cache:", cache_path)
         return cls._load_from_files(local_files, **kwargs)
-
-    # ---- methods subclasses must implement ----
-    @classmethod
-    def required_files(cls):
-        """Return list of required filenames for this resource."""
-        raise NotImplementedError
 
     @classmethod
     def _load_from_files(cls, local_files, **kwargs):
@@ -94,12 +99,12 @@ class HubMixin:
 
     # ---- generic download method (can be overridden) ----
     @classmethod
-    def _download_files(cls, supplier, model, local_files):
-        url_pattern = cls.SUPPLIERS[supplier]
+    def _download_files(cls, provider, model, local_files):
+        url_pattern = cls.PROVIDERS[provider]
 
         for fname, path in local_files.items():
             url = url_pattern.format(model=model, file=fname)
-            print(f"Downloading {url} → {path}")
+            print(f"Downloading {url} ...")
             r = requests.get(url)
             r.raise_for_status()
             with open(path, "wb") as f:

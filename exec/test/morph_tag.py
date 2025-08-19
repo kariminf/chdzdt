@@ -269,6 +269,97 @@ def train_model_streaming(models: Tuple[MultipleOutputClassifier, MultipleOutput
 
     writer.close()
 
+
+def test_model(models: Tuple[MultipleOutputClassifier, MultipleOutputClassifier],
+               tokenizer,
+               encoder,
+               words: np.array, 
+               outputs: List[np.ndarray],
+               outputs_info: List[Tuple[str, int]],
+               outputs_labels: Dict[str, LabelEncoder],
+               out_url: str,
+               batch: int = None, 
+               device=None
+               ):
+    
+    # Default to GPU if available
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Move model to device
+    models[0].to(device)
+    models[1].to(device)
+    models[0].eval()
+    models[1].eval()
+
+    all_preds_cls, all_preds_tok = [], []
+
+    for i in range(len(outputs_info)):
+        all_preds_cls.append([])
+        all_preds_tok.append([])
+
+    if batch is None:
+        pass
+        # Process all at once
+        # if isinstance(model, TokenSimpleClassifier):
+        #     X = get_sent_seq_embeddings(sentences, tokenizer, encoder, 30)
+        # else:
+        #     X = get_sent_embeddings(sentences, tokenizer, encoder)
+
+        # # Move embeddings to device
+        # X = torch.tensor(X, dtype=torch.float32).to(device)
+
+        # with torch.no_grad():
+        #     pred = model(X).detach().cpu().numpy()
+
+        # pred = np.argmax(pred, axis=1)
+        # all_preds = label_encoder.inverse_transform(pred)
+
+    else:
+        # Process in batches
+        for i in range(0, len(words), batch):
+            print(f"batch {i} is being tested ...")
+            batch_words= words[i:i + batch]
+
+            emb_cls, emb_tok = get_oneword_embeddings_cuda(batch_words, tokenizer, encoder, device=device)
+            
+            emb_cls, emb_tok = emb_cls.detach().to(device), emb_tok.detach().to(device)
+
+            with torch.no_grad():
+                pred_cls = models[0](emb_cls)
+                pred_tok = models[1](emb_tok)
+
+            for i in range(len(outputs_info)):
+                name = outputs_info[i][0]
+                pred_clsi = pred_cls[name].detach().cpu().numpy()
+                pred_toki = pred_tok[name].detach().cpu().numpy()
+
+                pred_clsi = np.argmax(pred_clsi, axis=1)
+                pred_toki = np.argmax(pred_toki, axis=1)
+
+            #     pred_clsi = outputs_labels[name].inverse_transform(pred_clsi)
+            #     pred_toki = outputs_labels[name].inverse_transform(pred_toki)
+
+                all_preds_cls[i].extend(pred_clsi)
+                all_preds_tok[i].extend(pred_toki)
+
+    # Classification report
+    os.makedirs(out_url, exist_ok=True)
+    with open(os.path.join(out_url, "test_results.txt"), "w", encoding="utf8") as f:
+        for i in range(len(outputs_info)):
+            
+            name = outputs_info[i][0]
+            # print("classification report " + name)
+
+            report = classification_report(outputs[i], all_preds_cls[i], target_names=outputs_labels[name].classes_, zero_division=0)
+            f.write(name + " CLS report:\n")
+            f.write(report)
+
+            report = classification_report(outputs[i], all_preds_tok[i], target_names=outputs_labels[name].classes_, zero_division=0)
+            f.write(name + " TOK report:\n")
+            f.write(report)
+
+
 # =============================================
 #          Command line parser
 # =============================================  
@@ -314,7 +405,7 @@ def test_main(args):
         outputs_info.append((feature, len(le.classes_)))
         output_label_encoders[feature] = le
 
-    words = data["word"].to_numpy()
+    words = data["word"].to_list()
 
     del data
 
@@ -336,8 +427,13 @@ def test_main(args):
         # print("training the tok classification model ...")
         # train_model(tok_model, emb_tok, outputs, outputs_info, os.path.join(mdl_url, "tok_logs"))
 
-        train_model_streaming((cls_model, tok_model), tokenizer, encoder, 
-                              words, outputs, outputs_info, os.path.join(mdl_url, "logs"))
+        train_model_streaming((cls_model, tok_model), 
+                              tokenizer, 
+                              encoder, 
+                              words, 
+                              outputs, 
+                              outputs_info, 
+                              os.path.join(mdl_url, "logs"))
 
         print("saving models ...")
         cls_model.save(os.path.join(mdl_url, "cls_model.pt"))
@@ -348,11 +444,24 @@ def test_main(args):
 
     else:
         print("testing the classification model ...")
-        
-        
 
-    
+        cls_model = MultipleOutputClassifier.load(os.path.join(mdl_url, "cls_model.pt"))
+        tok_model = MultipleOutputClassifier.load(os.path.join(mdl_url, "tok_model.pt"))
 
+        outputs_labels = joblib.load(os.path.join(mdl_url, "label_encoders.pkl"))
+
+        test_model((cls_model, tok_model),
+               tokenizer,
+               encoder,
+               words, 
+               outputs,
+               outputs_info,
+               outputs_labels,
+               mdl_url,
+               batch=1000, 
+               device=None
+               )
+        
 parser = argparse.ArgumentParser(description="test morphological clustering using a pre-trained model")
 parser.add_argument("-m", help="model label")
 parser.add_argument("-p", help="model name/path")
@@ -370,14 +479,14 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    src = "~/Data/DZDT/test/morph-tag/ara_conj_train.csv"
-    # src = "~/Data/DZDT/test/morph-tag/ara_conj_test.csv"
-    dst = "~/Data/DZDT/results/morph-tag/arabic_conj/"
+    # src = "~/Data/DZDT/test/morph-tag/fra_conj_train.csv"
+    src = "~/Data/DZDT/test/morph-tag/fra_conj_test.csv"
+    dst = "~/Data/DZDT/results/morph-tag/french_conj/"
 
     mdls = [
-        ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
-        ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
+        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
         # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
         # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
@@ -385,14 +494,15 @@ if __name__ == "__main__":
         # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
         # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
         # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
-        ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
+        # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),
-        ("dziribert", "alger-ia/dziribert"),
+        # ("dziribert", "alger-ia/dziribert"),
         ("caninec", "google/canine-c"),
     ]
 
     for mdl in mdls:
+
         print(f"Testing model {mdl[0]} ...")
         argv = [
             "-m", mdl[0],
