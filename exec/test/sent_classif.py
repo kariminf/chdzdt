@@ -675,11 +675,11 @@ if __name__ == "__main__":
     # args.func(args)
 
     # src = "~/Data/DZDT/test/text_classif/fr_train.csv"
-    src = "~/Data/DZDT/test/text_classif/fr_test.csv"
-    dst = "~/Data/DZDT/results/classif/Cardiffnlp_fr/"
+    src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.english.csv"
+    dst = "~/Data/DZDT/results/classif/SemEval2017en/"
 
     mdls = [
-        ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
+        # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
         # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
         # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
@@ -693,7 +693,7 @@ if __name__ == "__main__":
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),
         # ("dziribert", "alger-ia/dziribert"),
-        # ("caninec", "google/canine-c"),
+        ("caninec", "google/canine-c"),
     ]
 
     for mdl in mdls:

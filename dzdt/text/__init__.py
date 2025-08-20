@@ -20,10 +20,10 @@
 #
 
 from typing import List
-from dzdt.preprocess.emojicator import EMOJI_PROCESSOR
-from dzdt.preprocess.filterer import CharsetFilterer, DuplicateFilterer, RegexFilterer
-from dzdt.preprocess.normalizer import CHAR_NORMALIZER, ENTITY_WORD_NORMALIZER, FuncNormalizer, RegexNormalizer
-from dzdt.preprocess.tokenizer import CHARS_SPLITTER, SPACING_PROCESSOR, TOKENS_SPLITTER, RegexSplitter, SeqJoiner, SpacingProcessor, TokensSplitter
+from dzdt.text.emojicator import EMOJI_PROCESSOR
+from dzdt.text.filterer import CharsetFilterer, DuplicateFilterer, RegexFilterer
+from dzdt.text.normalizer import CHAR_NORMALIZER, ENTITY_WORD_NORMALIZER, FuncNormalizer, RegexNormalizer
+from dzdt.text.tokenizer import CHARS_SPLITTER, SPACING_PROCESSOR, TOKENS_SPLITTER, RegexSplitter, SeqJoiner, SpacingProcessor, TokensSplitter
 from dzdt.tools.chars import ARABIC_TASHKIIL_CHARSET, ARABIC_TATWEEL_ORD, CharManager, charset2string
 from dzdt.tools.process import SeqPipeline
 

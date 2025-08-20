@@ -259,3 +259,19 @@ class TrieValueProcessor(SeqProcessor):
 #         result = ([self.result] if len(self.result) else []) + self.remain
 #         self.init()
 #         return result
+
+
+class BatchEncoder(dict):
+    def to(self, device):
+        return BatchEncoder({k: v.to(device) for k, v in self.items()})
+    
+
+class ObjectDict(dict):
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(f"'ObjectDict' object has no attribute '{key}'")
+
+    def __setattr__(self, key, value):
+        self[key] = value

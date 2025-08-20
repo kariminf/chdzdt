@@ -74,6 +74,27 @@ class SeqSentEncoder(SaveableModel, nn.Module):
     def forward(self, x):
         _, hidden = self.gru(x)
         return torch.cat([hidden[-2], hidden[-1]], dim=1)
+    
+class SeqSeqEncoder(SaveableModel, nn.Module):
+    def __init__(self, input_dim, hidden_dim, num_layers=1, dropout=0.2):
+        super().__init__()
+        self.params = dict(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout,
+        )
+        self.gru = nn.GRU(
+            input_dim, hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+
+    def forward(self, x):
+        output, _ = self.gru(x)
+        return output
 
 
 class TokenSimpleClassifier(SaveableModel, nn.Module):
@@ -84,6 +105,24 @@ class TokenSimpleClassifier(SaveableModel, nn.Module):
             classifier_params=classifier_params,
         )
         self.encoder = SeqSentEncoder(**encoder_params)
+        self.classifier = SimpleClassifier(**classifier_params)
+
+    def forward(self, x):
+        enc = self.encoder(x)
+        out = self.classifier(enc)
+        return out
+    
+    def predict(self, x):
+        return F.softmax(self.forward(x))
+    
+class TokenSeqClassifier(SaveableModel, nn.Module):
+    def __init__(self, encoder_params, classifier_params):
+        super().__init__()
+        self.params = dict(
+            encoder_params=encoder_params,
+            classifier_params=classifier_params,
+        )
+        self.encoder = SeqSeqEncoder(**encoder_params)
         self.classifier = SimpleClassifier(**classifier_params)
 
     def forward(self, x):

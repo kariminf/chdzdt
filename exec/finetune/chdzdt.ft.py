@@ -34,7 +34,7 @@ from transformers import TrainingArguments
 from transformers import configuration_utils, modeling_utils
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from dzdt.train.datasets import (
+from dzdt.pipeline.hfdatasets import (
     CSVLoader, 
     DataTransformer, 
     GeneralDataset, 
@@ -43,8 +43,8 @@ from dzdt.train.datasets import (
     )
 from dzdt.model.chdzdt_tok import CharTokenizer
 from dzdt.model.chdzdt_mdl import MLMLMBertModel
-from dzdt.train.collectors import DataCollatorForMLMandMLC
-from dzdt.train.trainers import CharBertTrainer
+from dzdt.pipeline.hfcollectors import DataCollatorForMLMandMLC
+from dzdt.pipeline.hftrainers import CharBertTrainer
 from dzdt.tools.const import (
     BATCHSIZE,
     CHAR_NUM_ATTENTION_HEADS, 

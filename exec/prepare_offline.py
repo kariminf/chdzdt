@@ -30,8 +30,8 @@ from transformers import Trainer, TrainingArguments
 
 from dzdt.model.chdzdt_tok import DzDtCharTokenizer
 from dzdt.model.chdzdt_mdl      import MLMLMBertModel
-from dzdt.train.datasets       import CSVWordMultiLabel
-from dzdt.train.collectors import DataCollatorForMLMandMLC
+from dzdt.pipeline.hfdatasets       import CSVWordMultiLabel
+from dzdt.pipeline.hfcollectors import DataCollatorForMLMandMLC
 import pandas as pd
 import numpy as np
 

@@ -28,11 +28,11 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from dzdt.preprocess import LOWER_NORMALIZER
-from dzdt.preprocess.filterer import RegexFilterer
-from dzdt.preprocess.normalizer import ENTITY_WORD_NORMALIZER
-from dzdt.preprocess.stemmer import DzDtStemmer
-from dzdt.preprocess.tokenizer import RegexSplitter
+from dzdt.text import LOWER_NORMALIZER
+from dzdt.text.filterer import RegexFilterer
+from dzdt.text.normalizer import ENTITY_WORD_NORMALIZER
+from dzdt.text.stemmer import DzDtStemmer
+from dzdt.text.tokenizer import RegexSplitter
 from dzdt.tools.chars import ARABIC_TASHKIIL_CHARSET, ARABIC_TATWEEL_ORD, charset2string
 from dzdt.tools.const import TAG_LIST, MAX_WORD_SIZE
 from dzdt.tools.io import list_files

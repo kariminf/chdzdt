@@ -21,6 +21,7 @@
 
 from typing import Any, Union, List, Optional
 from dzdt.tools.chars import CharManager, DOUBLE_SPACE
+from dzdt.tools.struct import BatchEncoder
 import numpy as np
 # from tokenizers.models import Model
 # from tokenizers import Tokenizer
@@ -176,7 +177,7 @@ class CharTokenizer(CharManager): #, Model
             input_ids  = torch.tensor(input_ids)
             attention_mask = torch.tensor(attention_mask)
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask}
+        return BatchEncoder({"input_ids": input_ids, "attention_mask": attention_mask})
     
     # =============
     # decoding

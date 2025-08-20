@@ -33,9 +33,9 @@ from transformers import Trainer, TrainingArguments
 
 from dzdt.model.chdzdt_tok import DzDtCharTokenizer
 from dzdt.model.chdzdt_mdl      import MLMLMBertModel
-from dzdt.train.datasets       import CSVWordMultiLabel, CSVWordMultiLabelSwap, DatasetSwapTrainerCallback
-from dzdt.train.collectors import DataCollatorForMLMandMLC
-from dzdt.train.trainers import CharBertTrainer
+from dzdt.pipeline.hfdatasets       import CSVWordMultiLabel, CSVWordMultiLabelSwap, DatasetSwapTrainerCallback
+from dzdt.pipeline.hfcollectors import DataCollatorForMLMandMLC
+from dzdt.pipeline.hftrainers import CharBertTrainer
 
 import numpy as np
 

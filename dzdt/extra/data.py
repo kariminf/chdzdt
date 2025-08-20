@@ -50,3 +50,27 @@ def get_word_noisy_data(url: str) -> Tuple[List[str], List[str], List[str]]:
     return (data["word"].tolist(), 
             data["obfus1fix"].tolist(), 
             data["obfus1var"].tolist())
+
+
+def get_tagging_data(url: str, max_words=None) -> Tuple[List[List[str]], List[List[str]]]:
+    url = os.path.expanduser(url)
+    X_words, Y_tags = [], []
+    with open(url, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            words, tags = line.split("\t")
+            words, tags = words.split(), tags.split()
+            
+            if max_words is not None:
+                l = len(words)
+                if l > max_words:
+                    words, tags = words[:max_words], tags[:max_words]
+                else: # >=
+                    l = max_words - l
+                    words, tags = words + (["<PAD>"] * l), tags + (["<PAD>"] * l)
+            X_words.append(words)
+            Y_tags.append(tags)
+    return X_words, Y_tags
