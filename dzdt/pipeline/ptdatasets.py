@@ -20,7 +20,7 @@
 #
 
 from torch.utils.data import Dataset
-from typing import Any
+from typing import Any, List
 
 class SimpleDataset(Dataset):
     def __init__(self, X: Any, y: Any):
@@ -30,3 +30,14 @@ class SimpleDataset(Dataset):
         return len(self.X)
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
+    
+class MultipleOutputDataset(Dataset):
+    def __init__(self, X: Any, y: List[Any]):
+        self.X = X
+        self.y = y
+    def __len__(self):
+        return len(self.X)
+    def __getitem__(self, idx):
+        Xi = self.X[idx]
+        yi = [v[idx] for v in self.y]
+        return (Xi, *yi)

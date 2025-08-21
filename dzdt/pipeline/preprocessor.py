@@ -36,6 +36,7 @@ class Embedder:
         self.one_word = one_word
 
         self.encoder.to(self.device)
+        self.encoder.eval()
 
     def encode(self, text):
         if self.one_word: 
@@ -49,14 +50,14 @@ class Embedder:
                 with torch.no_grad():
                     outputs = self.encoder(**tokens)
                 
-                emb = outputs.last_hidden_state
+                emb = outputs.last_hidden_state.detach()
                 if self.pooling == "cls":
                     emb = emb[:, 0, :]
                 elif self.pooling == "mean":
-                    emb = emb.mean(dim=1)
+                    emb = emb[:, 1:, :].mean(dim=1)
                 result.append(emb)
             
-            return torch.stack(result, dim=0)
+            return torch.stack(result)
 
         tokens = self.tokenizer(text, 
                                 return_tensors="pt", 
@@ -66,10 +67,37 @@ class Embedder:
         with torch.no_grad():
             outputs = self.encoder(**tokens)
 
+        emb = outputs.last_hidden_state.detach()
+
         if self.pooling == "cls":
-            return outputs.last_hidden_state[:, 0, :]
+            return emb[:, 0, :]
         elif self.pooling == "mean":
-            return outputs.last_hidden_state.mean(dim=1)
+            return emb[:, 1:, :].mean(dim=1)
         
-        return outputs.last_hidden_state
+        return emb
+    
+class ClsTokEmbedder:
+    def __init__(self, tokenizer, encoder, device=None):
+        self.device = device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.tokenizer = tokenizer
+        self.encoder  = encoder
+
+        self.encoder.to(self.device)
+        self.encoder.eval()
+
+    def encode(self, text):
+        tokens = self.tokenizer(text, 
+                                return_tensors="pt", 
+                                padding=True, 
+                                truncation=True, 
+                                add_special_tokens=True).to(self.device)
+        with torch.no_grad():
+            outputs = self.encoder(**tokens)
+
+        emb = outputs.last_hidden_state.detach()
+        
+        return emb[:, 0, :], emb[:, 1:, :].mean(dim=1)
     

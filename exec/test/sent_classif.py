@@ -22,55 +22,76 @@
 import argparse
 import sys
 import os
-import pandas as pd
 import torch
-import numpy as np
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
-import umap
-import numpy as np
-from typing import List, Tuple
 from sklearn.preprocessing import LabelEncoder
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import classification_report
-
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-
-from sklearn.linear_model import LinearRegression, RidgeCV
-from sklearn.decomposition import PCA
 import joblib 
 from torch import nn
-import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader, Dataset
-
+from torch.utils.data import DataLoader
 
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from dzdt.extra.data import get_csv_string_data
-from dzdt.model.classif import SeqSentEncoder, SimpleClassifier, TokenSimpleClassifier
-from dzdt.extra.plms import get_sent_seq_embeddings, get_sent_embeddings, load_model, get_sent_embeddings_cuda
+from dzdt.model.classif import SimpleClassifier, TokenSimpleClassifier
+from dzdt.extra.plms import get_embedding_size, load_model
+from dzdt.pipeline.preprocessor import Embedder
+from dzdt.pipeline.ptdatasets import SimpleDataset
+from dzdt.pipeline.pttesters import SimpleTester, SimpleTesterConfig
+from dzdt.pipeline.recorders import BatchPrinter, WritePrintRecorder
+from dzdt.tools.struct import ObjectDict
+from dzdt.pipeline.pttrainers import SimpleTrainer, SimpleTrainerConfig
 
 # =======================================================================
-#    Testing 
+#    Training 
 # =======================================================================
 
+def load_classif_model(url: str, seq=False):
+    label_encoder: LabelEncoder = joblib.load(os.path.join(url, "label_encoder.pkl"))
 
-def train_model(data_url: str, out_url: str, tokenizer, encoder, seq= False, epochs=20, batch_size=1000, lr=1e-4, gamma=None):
-    data = get_csv_string_data(data_url)
-    # Get the output embedding dimension of the encoder/model
-    if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
-        emb_d = encoder.config.hidden_size
-    elif hasattr(encoder, "hidden_size"):
-        emb_d = encoder.hidden_size
-    elif hasattr(encoder, "d_model"):
-        emb_d = encoder.d_model
+    if seq:
+        model = TokenSimpleClassifier.load(os.path.join(url, "model.pt"), map_location="cpu")
     else:
-        raise AttributeError("Cannot determine embedding dimension from encoder/model.")
-    
+        model = SimpleClassifier.load(os.path.join(url, "model.pt"), map_location="cpu")
+
+    return model, label_encoder
+
+
+def train_model(params):
+
+    data = get_csv_string_data(params.input_url)
     sentences = data["text"].tolist()
 
+    if params.seq:
+        sentence_words = []
+        for sentence in sentences:
+            sentence = sentence.split()
+            l = len(sentence)
+            if params.max_words != l:
+                if l > params.max_words:
+                    sentence = sentence[:params.max_words]
+                else:
+                    sentence = sentence + [""] * (params.max_words - l)
+            sentence_words.append(sentence)
+        sentences = sentence_words
+
+
+    label_encoder = LabelEncoder()
+    Y = label_encoder.fit_transform(data["class"])
+    Y = torch.tensor(Y, dtype=torch.long)
+
+
+    def collate_batch(batch):
+        sentences, labels = zip(*batch)   # unzip
+        return list(sentences), torch.tensor(labels, dtype=torch.long)
+    
+    data_loader = DataLoader(SimpleDataset(sentences, Y), batch_size=params.batch_size, shuffle=True, collate_fn=collate_batch)
+    
+    if not params.stream:
+        sentences = params.embedder.encode(sentences)
+        data_loader = DataLoader(SimpleDataset(sentences, Y), batch_size=params.batch_size, shuffle=True)
+
+    emb_d = get_embedding_size(params.embedder.encoder)
     classifier_params = dict(
         input_dim=768,
         hidden_dim=768,
@@ -79,7 +100,7 @@ def train_model(data_url: str, out_url: str, tokenizer, encoder, seq= False, epo
         dropout=0.2
     )
 
-    if seq:
+    if params.seq:
         encoder_params = dict(
             input_dim=emb_d,
             hidden_dim=384,
@@ -87,582 +108,222 @@ def train_model(data_url: str, out_url: str, tokenizer, encoder, seq= False, epo
             dropout=0.2,
         )
         model = TokenSimpleClassifier(encoder_params, classifier_params)
-        X = get_sent_seq_embeddings(sentences, tokenizer, encoder, max_words=30)
     else:
         model = SimpleClassifier(**classifier_params)
-        X = get_sent_embeddings(sentences, tokenizer, encoder)
 
-    # Convert labels to tensor
-    label_encoder = LabelEncoder()
-    Y = label_encoder.fit_transform(data["class"])
-    Y = torch.tensor(Y, dtype=torch.long)
+    config = SimpleTrainerConfig(
+        model=model,
+        data_loader=data_loader,
+        optimizer=torch.optim.Adam(model.parameters(), lr=1e-3),
+        criterion=nn.CrossEntropyLoss(),
+        embedder=params.embedder,
+        recorder=WritePrintRecorder(os.path.join(params.mdl_url, "logs")),
+        stream=True,
+    )
+    
+    print("Training Classif model ...")
+    trainer = SimpleTrainer(config)
 
-    # Convert embeddings to tensor
-    if not torch.is_tensor(X):
-        X = torch.tensor(X, dtype=torch.float)
-
-    # Create DataLoader
-    dataset = TensorDataset(X, Y)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    # Move model to device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-
-    # Define loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    os.makedirs(out_url, exist_ok=True)
-    writer = SummaryWriter(log_dir=os.path.join(out_url, "logs"))
-
-    # Training loop
-    model.train()
-    for epoch in range(epochs):
-        total_loss = 0.0
-        correct = 0
-        total = 0
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item() * inputs.size(0)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-        epoch_loss = total_loss / len(dataset)
-        accuracy = 100 * correct / total
-
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Acc: {accuracy:.2f}%")
-        writer.add_scalar("Loss/train", epoch_loss, epoch)
-        writer.add_scalar("Accuracy/train", accuracy, epoch)
-
-        if gamma is not None and epoch_loss <= gamma:
-            break
-
-    writer.close()
+    trainer.train(epochs=params.epochs, gamma=params.gamma)
+    
 
     print("Training complete, saving ...")
     # Save model & label encoder
-    model.save(os.path.join(out_url, "model.pt"))
-    joblib.dump(label_encoder, os.path.join(out_url, "label_encoder.pkl"))
+    model.save(os.path.join(params.mdl_url, "model.pt"))
+    joblib.dump(label_encoder, os.path.join(params.mdl_url, "label_encoder.pkl"))
 
-    model.eval()
-    eval_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+# =======================================================================
+#    Testing
+# =======================================================================
 
-    all_preds = []
-    all_labels = []
-    with torch.no_grad():
-        for inputs, labels in eval_loader:
-            inputs = inputs.to(device)
-            outputs = model(inputs)
-            pred = torch.argmax(outputs, dim=1).cpu().numpy()
-            all_preds.extend(pred)
-            all_labels.extend(labels.cpu().numpy())
-                          
-    
-    # Classification report
-    report_cls = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
+def test_model(params):
+    print("testing the classification model ...")
 
-    os.makedirs(out_url, exist_ok=True)
-    with open(os.path.join(out_url, "train_results.txt"), "w", encoding="utf8") as f:
-        f.write(report_cls)
-        f.write("\n\n")
-        f.write(f"Training epochs: {epoch+1}\n")
-        f.write(f"Batch size: {batch_size}\n")
-        f.write(f"Learning rate: {lr}\n")
-        f.write(f"Embedding dimension: {emb_d}\n")
-        f.write(f"Loss: {epoch_loss}\n")
-        
+    model, label_encoder = load_classif_model(params.mdl_url, seq=params.seq)
 
-    return model, label_encoder
-
-def load_classif_model(url: str, seq=False):
-    label_encoder: LabelEncoder = joblib.load(os.path.join(url, "label_encoder.pkl"))
-
-    if seq:
-        model = TokenSimpleClassifier.load(os.path.join(url, "model.pt"))
-    else:
-        model = SimpleClassifier.load(os.path.join(url, "model.pt"))
-
-    return model, label_encoder
-
-# ---------- Dataset ----------
-class SentenceDataset(Dataset):
-    def __init__(self, texts, labels):
-        self.texts = texts
-        self.labels = labels
-    def __len__(self):
-        return len(self.texts)
-    def __getitem__(self, idx):
-        return self.texts[idx], self.labels[idx]
-        
-def train_model_streaming(
-    data_url: str,
-    out_url: str,
-    tokenizer,
-    encoder,
-    seq=False,
-    epochs=20,
-    batch_size=32,
-    lr=1e-4,
-    gamma=None,
-    max_len=30,
-    device=None
-):
-
-    # ---------- Load CSV ----------
-    data = get_csv_string_data(data_url)
+    data = get_csv_string_data(params.input_url)
     sentences = data["text"].tolist()
-    label_encoder = LabelEncoder()
-    labels = label_encoder.fit_transform(data["class"].tolist())
-    labels = torch.tensor(labels, dtype=torch.long)
 
-    # ---------- Model ----------
-    if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
-        emb_d = encoder.config.hidden_size
-    elif hasattr(encoder, "hidden_size"):
-        emb_d = encoder.hidden_size
-    elif hasattr(encoder, "d_model"):
-        emb_d = encoder.d_model
-    else:
-        raise AttributeError("Cannot determine embedding dimension from encoder/model.")
+    if params.seq:
+        sentence_words = []
+        for sentence in sentences:
+            sentence = sentence.split()
+            l = len(sentence)
+            if params.max_words != l:
+                if l > params.max_words:
+                    sentence = sentence[:params.max_words]
+                else:
+                    sentence = sentence + [""] * (params.max_words - l)
+            sentence_words.append(sentence)
+        sentences = sentence_words
 
-    classifier_params = dict(
-        input_dim=768,
-        hidden_dim=768,
-        output_dim=len(label_encoder.classes_),
-        hid_layers=1,
-        dropout=0.2
+
+
+    Y = label_encoder.transform(data["class"]).tolist()
+
+
+    def collate_batch(batch):
+        sentences, labels = zip(*batch)   # unzip
+        return list(sentences), torch.tensor(labels, dtype=torch.long)
+    
+    data_loader = DataLoader(SimpleDataset(sentences, Y), batch_size=params.batch_size, shuffle=False, collate_fn=collate_batch)
+    
+    if not params.stream:
+        sentences = params.embedder.encode(sentences)
+        data_loader = DataLoader(SimpleDataset(sentences, Y), batch_size=params.batch_size, shuffle=False)
+
+    
+    def classif_report(Y_true, Y_pred):
+        return classification_report(Y_true, Y_pred, target_names=label_encoder.classes_, zero_division=0, digits=4)
+
+    config = SimpleTesterConfig(
+        model=model,
+        data_loader=data_loader,
+        embedder=params.embedder,
+        stream=True,
+        recorder=BatchPrinter(),
+        criteria=[classif_report],
     )
 
-    if seq:
-        encoder_params = dict(
-            input_dim=emb_d,
-            hidden_dim=384,
-            num_layers=1,
-            dropout=0.2,
-        )
-        model = TokenSimpleClassifier(encoder_params, classifier_params)
-    else:
-        model = SimpleClassifier(**classifier_params)
+    tester = SimpleTester(config)
 
-    # ---------- Device ----------
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    encoder = encoder.to(device)
+    results = tester.test()
 
-    # ---------- DataLoader ----------
-    dataset = SentenceDataset(sentences, labels)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    with open(os.path.join(params.mdl_url, "test_results.txt"), "w", encoding="utf8") as f:
+        f.write(results[0])
 
-    # ---------- Loss & Optim ----------
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    os.makedirs(out_url, exist_ok=True)
-    writer = SummaryWriter(log_dir=os.path.join(out_url, "logs"))
 
-    # ---------- Training ----------
-    model.train()
-    for epoch in range(epochs):
-        total_loss, correct, total = 0.0, 0, 0
-        for batch_sentences, batch_labels in dataloader:
-            batch_labels = batch_labels.to(device)
+# def test_fusion(args):
+#     print("fusion of chdzdt and best performer")
+#     trn_url = os.path.expanduser("~/Data/DZDT/test/text_classif/fr_train.csv")
+#     tst_url = os.path.expanduser("~/Data/DZDT/test/text_classif/fr_test.csv")
+#     mdl_url = os.path.expanduser("~/Data/DZDT/results/classif/Cardiffnlp_fr/")
+#     lr = 0.001
+#     epochs = 100
+#     batch_size = 1000 #train
+#     batch = 1000 # test
+#     gamma = 0.1
 
-            # Encode with BERT inside the loop
-            inputs = tokenizer(
-                list(batch_sentences),
-                padding=True,
-                truncation=True,
-                max_length=max_len,
-                return_tensors="pt"
-            ).to(device)
+#     chdzdt_inf = ("chdzdt_4x4x32_20it", os.path.expanduser("~/Data/DZDT/models/chdzdt_4x4x32_20it"))
+#     best_inf = ("dziribert", "alger-ia/dziribert")
 
-            with torch.no_grad():
-                bert_out = encoder(**inputs)
-                if hasattr(bert_out, "last_hidden_state"):
-                    embeddings = bert_out.last_hidden_state[:, 0, :]  # CLS token
-                else:
-                    embeddings = bert_out[0][:, 0, :]
+#     tokenizer_chdzdt, encoder_chdzdt = load_model(chdzdt_inf[1])
+#     tokenizer_best, encoder_best = load_model(best_inf[1])
 
-            # if seq:
-            #     embeddings = get_sent_seq_embeddings(batch_sentences, tokenizer, encoder, max_words=30)
-            # else:
-            #     model = SimpleClassifier(**classifier_params)
-            #     embeddings = get_sent_embeddings(batch_sentences, tokenizer, encoder)
+#     model, label_encoder = load_classif_model(os.path.join(mdl_url, chdzdt_inf[0]), seq=True)
 
-            optimizer.zero_grad()
-            outputs = model(embeddings)
-            loss = criterion(outputs, batch_labels)
-            loss.backward()
-            optimizer.step()
+#     seq_sent_encoder = model.encoder
 
-            total_loss += loss.item() * batch_labels.size(0)
-            _, predicted = torch.max(outputs, 1)
-            total += batch_labels.size(0)
-            correct += (predicted == batch_labels).sum().item()
+#     out_url = os.path.join(mdl_url, f"{best_inf[0]}_{chdzdt_inf[0]}")
 
-        epoch_loss = total_loss / len(dataset)
-        accuracy = 100 * correct / total
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Acc: {accuracy:.2f}%")
-        writer.add_scalar("Loss/train", epoch_loss, epoch)
-        writer.add_scalar("Accuracy/train", accuracy, epoch)
+#     model, label_encoder = load_classif_model(out_url, seq=False)
 
-        if gamma is not None and epoch_loss <= gamma:
-            break
-
-    writer.close()
-
-    # ---------- Save ----------
-    print("Training complete, saving ...")
-    model.save(os.path.join(out_url, "model.pt"))
-    joblib.dump(label_encoder, os.path.join(out_url, "label_encoder.pkl"))
-
-    # ---------- Evaluation ----------
-    model.eval()
-    all_preds, all_labels = [], []
-    with torch.no_grad():
-        for batch_sentences, batch_labels in DataLoader(dataset, batch_size=batch_size):
-            batch_labels = batch_labels.to(device)
-            inputs = tokenizer(
-                list(batch_sentences),
-                padding=True,
-                truncation=True,
-                max_length=max_len,
-                return_tensors="pt"
-            ).to(device)
-
-            bert_out = encoder(**inputs)
-            if hasattr(bert_out, "last_hidden_state"):
-                embeddings = bert_out.last_hidden_state[:, 0, :]
-            else:
-                embeddings = bert_out[0][:, 0, :]
-
-            outputs = model(embeddings)
-            preds = torch.argmax(outputs, dim=1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(batch_labels.cpu().numpy())
-
-    report_cls = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
-    with open(os.path.join(out_url, "train_results.txt"), "w", encoding="utf8") as f:
-        f.write(report_cls)
-
-    return model, label_encoder
-
-
-def test_model(data_url: str, out_url: str, label_encoder, model, tokenizer, encoder, batch: int = None, device=None):
-    # Default to GPU if available
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Move model to device
-    model.to(device)
-    model.eval()
-
-    data = get_csv_string_data(data_url)
-    sentences = data["text"].tolist()
-    all_preds = []
-
-    if batch is None:
-        # Process all at once
-        if isinstance(model, TokenSimpleClassifier):
-            X = get_sent_seq_embeddings(sentences, tokenizer, encoder, 30)
-        else:
-            X = get_sent_embeddings(sentences, tokenizer, encoder)
-
-        # Move embeddings to device
-        X = torch.tensor(X, dtype=torch.float32).to(device)
-
-        with torch.no_grad():
-            pred = model(X).detach().cpu().numpy()
-
-        pred = np.argmax(pred, axis=1)
-        all_preds = label_encoder.inverse_transform(pred)
-
-    else:
-        # Process in batches
-        for i in range(0, len(sentences), batch):
-            print(f"batch {i} is being tested ...")
-            batch_sentences = sentences[i:i + batch]
-
-            if isinstance(model, TokenSimpleClassifier):
-                X = get_sent_seq_embeddings(batch_sentences, tokenizer, encoder, 30)
-            else:
-                X = get_sent_embeddings(batch_sentences, tokenizer, encoder)
-
-            if X.device != device: # ensure X is on the right device
-                X = X.to(device)
-
-            with torch.no_grad():
-                pred = model(X).detach().cpu().numpy()
-
-            del X
-            torch.cuda.empty_cache()
-
-            pred = np.argmax(pred, axis=1)
-            batch_preds = label_encoder.inverse_transform(pred)
-            all_preds.extend(batch_preds)
-
-    # Classification report
-    Y = data["class"].tolist()
-    report_cls = classification_report(Y, all_preds, target_names=label_encoder.classes_, zero_division=0)
-
-    os.makedirs(out_url, exist_ok=True)
-    with open(os.path.join(out_url, "test_results.txt"), "w", encoding="utf8") as f:
-        f.write(report_cls)
-
-
-
-
-
-
-
-# =============================================
-#          Command line parser
-# =============================================  
-# 
-
-def test_other(args):
-    print("fusion of chdzdt and best performer")
-    trn_url = os.path.expanduser("~/Data/DZDT/test/text_classif/fr_train.csv")
-    tst_url = os.path.expanduser("~/Data/DZDT/test/text_classif/fr_test.csv")
-    mdl_url = os.path.expanduser("~/Data/DZDT/results/classif/Cardiffnlp_fr/")
-    lr = 0.001
-    epochs = 100
-    batch_size = 1000 #train
-    batch = 1000 # test
-    gamma = 0.1
-
-    chdzdt_inf = ("chdzdt_4x4x32_20it", os.path.expanduser("~/Data/DZDT/models/chdzdt_4x4x32_20it"))
-    best_inf = ("dziribert", "alger-ia/dziribert")
-
-    tokenizer_chdzdt, encoder_chdzdt = load_model(chdzdt_inf[1])
-    tokenizer_best, encoder_best = load_model(best_inf[1])
-
-    model, label_encoder = load_classif_model(os.path.join(mdl_url, chdzdt_inf[0]), seq=True)
-
-    seq_sent_encoder = model.encoder
-
-    out_url = os.path.join(mdl_url, f"{best_inf[0]}_{chdzdt_inf[0]}")
-
-    model, label_encoder = load_classif_model(out_url, seq=False)
-
-    # print("training ....")
-
-    # classifier_params = dict(
-    #     input_dim=768,
-    #     hidden_dim=768,
-    #     output_dim=len(label_encoder.classes_),
-    #     hid_layers=1,
-    #     dropout=0.2
-    # )
-
-    # model = SimpleClassifier(**classifier_params)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # model = model.to(device)
-
-
-    # # ---------- Load CSV ----------
-    # data = get_csv_string_data(trn_url)
-    # sentences = data["text"].tolist()
-    # labels = label_encoder.transform(data["class"].tolist())
-    # labels = torch.tensor(labels, dtype=torch.long)
-
-    # del data
-
-    # # ---------- DataLoader ----------
-    # dataset = SentenceDataset(sentences, labels)
-    # dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    # # ---------- Loss & Optim ----------
-    # criterion = nn.CrossEntropyLoss()
-    # optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    # out_url = os.path.join(mdl_url, f"{best_inf[0]}_{chdzdt_inf[0]}")
-
-    # os.makedirs(out_url, exist_ok=True)
-    # writer = SummaryWriter(log_dir=os.path.join(out_url, "logs"))
-
-    # # ---------- Training ----------
-    # encoder_best.to(device)
-    # model.train()
-    # for epoch in range(epochs):
-    #     total_loss, correct, total = 0.0, 0, 0
-    #     for batch_sentences, batch_labels in dataloader:
-
-    #         batch_sentences = list(batch_sentences)
-
-    #         with torch.no_grad():
-    #             # bert_embeddings = get_sent_embeddings(batch_sentences, tokenizer_best, encoder_best)
-    #             bert_embeddings = get_sent_embeddings_cuda(batch_sentences, tokenizer_best, encoder_best, device=device)
-    #             chdzdt_embeddings = get_sent_seq_embeddings(batch_sentences, tokenizer_chdzdt, encoder_chdzdt)
-    #             chdzdt_embeddings = seq_sent_encoder(chdzdt_embeddings)
-    #             bert_embeddings = bert_embeddings.cpu()
-    #             embeddings = bert_embeddings + chdzdt_embeddings
-    #             del bert_embeddings, chdzdt_embeddings
-
-    #         batch_labels = batch_labels.to(device)
-    #         embeddings = embeddings.to(device)
-
-    #         optimizer.zero_grad()
-    #         outputs = model(embeddings)
-    #         loss = criterion(outputs, batch_labels)
-    #         loss.backward()
-    #         optimizer.step()
-
-    #         total_loss += loss.item() * batch_labels.size(0)
-    #         _, predicted = torch.max(outputs, 1)
-    #         total += batch_labels.size(0)
-    #         correct += (predicted == batch_labels).sum().item()
-
-    #     epoch_loss = total_loss / len(dataset)
-    #     accuracy = 100 * correct / total
-    #     print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Acc: {accuracy:.2f}%")
-    #     writer.add_scalar("Loss/train", epoch_loss, epoch)
-    #     writer.add_scalar("Accuracy/train", accuracy, epoch)
-
-    #     if gamma is not None and epoch_loss <= gamma:
-    #         break
-
-    # writer.close()
-
-    # # ---------- Save ----------
-    # print("Training complete, saving ...")
-    # model.save(os.path.join(out_url, "model.pt"))
-    # joblib.dump(label_encoder, os.path.join(out_url, "label_encoder.pkl"))
-
-    # # ---------- Evaluation ----------
-    # print("evaluating training")
-    # model.eval()
-    # all_preds, all_labels = [], []
-    # with torch.no_grad():
-    #     for batch_sentences, batch_labels in DataLoader(dataset, batch_size=batch_size):
-    #         batch_sentences = list(batch_sentences)
-
-    #         bert_embeddings = get_sent_embeddings_cuda(batch_sentences, tokenizer_best, encoder_best, device=device)
-    #         chdzdt_embeddings = get_sent_seq_embeddings(batch_sentences, tokenizer_chdzdt, encoder_chdzdt)
-    #         chdzdt_embeddings = seq_sent_encoder(chdzdt_embeddings)
-    #         bert_embeddings = bert_embeddings.cpu()
-    #         embeddings = bert_embeddings + chdzdt_embeddings
-    #         del bert_embeddings, chdzdt_embeddings
-            
-    #         batch_labels = batch_labels.to(device)
-    #         embeddings = embeddings.to(device)
-
-    #         outputs = model(embeddings)
-    #         preds = torch.argmax(outputs, dim=1)
-    #         all_preds.extend(preds.cpu().numpy())
-    #         all_labels.extend(batch_labels.cpu().numpy())
-
-    # report_cls = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
-    # with open(os.path.join(out_url, "train_results.txt"), "w", encoding="utf8") as f:
-    #     f.write(report_cls)
-
-
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     # model = model.to(device)
     
 
-    print("evaluating testing")
-    encoder_best.to(device)
-    model = model.to(device)
-    model.eval()
-    encoder_best.eval()
-    encoder_chdzdt.eval()
+#     print("evaluating testing")
+#     encoder_best.to(device)
+#     model = model.to(device)
+#     model.eval()
+#     encoder_best.eval()
+#     encoder_chdzdt.eval()
 
-    data = get_csv_string_data(tst_url)
-    sentences = data["text"].tolist()
-    Y = data["class"].tolist()
-    del data
-    all_preds = []
+#     data = get_csv_string_data(tst_url)
+#     sentences = data["text"].tolist()
+#     Y = data["class"].tolist()
+#     del data
+#     all_preds = []
 
-    for i in range(0, len(sentences), batch):
-        print(f"batch {i} is being tested ...")
-        batch_sentences = sentences[i:i + batch]
+#     for i in range(0, len(sentences), batch):
+#         print(f"batch {i} is being tested ...")
+#         batch_sentences = sentences[i:i + batch]
 
-        with torch.no_grad():
-            bert_embeddings = get_sent_embeddings_cuda(batch_sentences, tokenizer_best, encoder_best, device=device)
-            chdzdt_embeddings = get_sent_seq_embeddings(batch_sentences, tokenizer_chdzdt, encoder_chdzdt)
-            chdzdt_embeddings = seq_sent_encoder(chdzdt_embeddings)
-            bert_embeddings = bert_embeddings.cpu()
-            embeddings = bert_embeddings + chdzdt_embeddings
-            del bert_embeddings, chdzdt_embeddings
-            embeddings = embeddings.to(device)
-            pred = model(embeddings).detach().cpu().numpy()
+#         with torch.no_grad():
+#             bert_embeddings = get_sent_embeddings_cuda(batch_sentences, tokenizer_best, encoder_best, device=device)
+#             chdzdt_embeddings = get_sent_seq_embeddings(batch_sentences, tokenizer_chdzdt, encoder_chdzdt)
+#             chdzdt_embeddings = seq_sent_encoder(chdzdt_embeddings)
+#             bert_embeddings = bert_embeddings.cpu()
+#             embeddings = bert_embeddings + chdzdt_embeddings
+#             del bert_embeddings, chdzdt_embeddings
+#             embeddings = embeddings.to(device)
+#             pred = model(embeddings).detach().cpu().numpy()
 
-        pred = np.argmax(pred, axis=1)
-        batch_preds = label_encoder.inverse_transform(pred)
-        all_preds.extend(batch_preds)
+#         pred = np.argmax(pred, axis=1)
+#         batch_preds = label_encoder.inverse_transform(pred)
+#         all_preds.extend(batch_preds)
 
-    # Classification report
+#     # Classification report
     
-    report_cls = classification_report(Y, all_preds, target_names=label_encoder.classes_, zero_division=0)
+#     report_cls = classification_report(Y, all_preds, target_names=label_encoder.classes_, zero_division=0)
 
-    os.makedirs(out_url, exist_ok=True)
-    with open(os.path.join(out_url, "test_results.txt"), "w", encoding="utf8") as f:
-        f.write(report_cls)
+#     os.makedirs(out_url, exist_ok=True)
+#     with open(os.path.join(out_url, "test_results.txt"), "w", encoding="utf8") as f:
+#         f.write(report_cls)
 
-    
 
-def test_main(args):
+# =======================================================================
+#    Main function 
+# =======================================================================
+
+
+def main_func(args):
 
     # if torch.cuda.is_available():
     #     print("cuda exists")
     # print("bye")
     # exit()
 
+    tokenizer, encoder = load_model(args.p)
+
     seq = False
     if "chdzdt" in args.p:
         seq = True
-
-    tokenizer, encoder = load_model(args.p)
-
-    output: str = os.path.expanduser(args.output)
-    input: str = os.path.expanduser(args.input)
-
-    if "train" in args.input:
-        print("training the classification model ...")
-        model, label_encoder = train_model(args.input, 
-                                           os.path.join(output, args.m), 
-                                           tokenizer, 
-                                           encoder, 
-                                           epochs=100,
-                                           batch_size=2000,
-                                           seq=seq, 
-                                           gamma=0.1,
-                                           lr=0.001)
-        
-        # model, label_encoder = train_model_streaming(
-        #                                 args.input, 
-        #                                 os.path.join(output, args.m), 
-        #                                 tokenizer,
-        #                                 encoder,
-        #                                 seq=seq,
-        #                                 epochs=100,
-        #                                 batch_size=1000,
-        #                                 lr=0.001,
-        #                                 gamma=0.1,
-        #                                 )
+        embedder = Embedder(tokenizer, encoder, pooling="cls", one_word=True)
     else:
-        model, label_encoder = load_classif_model(os.path.join(output, args.m), seq=seq)
+        embedder = Embedder(tokenizer, encoder, pooling="cls")
 
-        test_model(input, os.path.join(output, args.m), label_encoder, model, tokenizer, encoder, 
-                   batch=1000)
 
-    
+    output_url: str = os.path.expanduser(args.output)
+    input_url: str = os.path.expanduser(args.input)
+    mdl_url: str    = os.path.join(output_url, args.m)
+
+
+    params = ObjectDict()
+    params.seq = seq
+    params.mdl_url = mdl_url
+    params.input_url = input_url
+    params.embedder = embedder
+    params.max_words = 30 # if seq 30
+
+    params.batch_size = 2000
+    params.stream=True
+
+    try:
+        if "train" in args.input:
+            print("training the classification model ...")
+            params.epochs=10
+            params.gamma=0.1
+            train_model(params)
+        else:
+            test_model(params)
+        
+    except KeyboardInterrupt:
+        print("\nInterrupted by user! Cleaning up CUDA...")
+        torch.cuda.empty_cache()
+        sys.exit(0) 
+
+# =============================================
+#          Command line parser
+# ============================================= 
 
 parser = argparse.ArgumentParser(description="test morphological clustering using a pre-trained model")
 parser.add_argument("-m", help="model label")
 parser.add_argument("-p", help="model name/path")
 parser.add_argument("input", help="input clusters' file")
 parser.add_argument("output", help="output txt file containing the results")
-parser.set_defaults(func=test_main)
+parser.set_defaults(func=main_func)
 # parser.set_defaults(func=test_other)
 
 
@@ -675,13 +336,24 @@ if __name__ == "__main__":
     # args.func(args)
 
     # src = "~/Data/DZDT/test/text_classif/fr_train.csv"
-    src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.english.csv"
-    dst = "~/Data/DZDT/results/classif/SemEval2017en/"
+    # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.arabic_flt.csv"
+    # dst = "~/Data/DZDT/results/classif/SemEval2017ar_flt/"
+
+    # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.english_flt.csv"
+    # dst = "~/Data/DZDT/results/classif/SemEval2017en_flt/"
+
+    # src = "~/Data/DZDT/test/text_classif/twifil_test_flt.csv"
+    # dst = "~/Data/DZDT/results/classif/Twifil_dz_flt/"
+
+    # src = "~/Data/DZDT/test/text_classif/twifil_train_flt.csv"
+    src = "~/Data/DZDT/test/text_classif/twifil_test_flt.csv"
+    dst = "~/Data/DZDT/results/classif/testing/"
+    
 
     mdls = [
         # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
         # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
         # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
         # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
@@ -693,7 +365,7 @@ if __name__ == "__main__":
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),
         # ("dziribert", "alger-ia/dziribert"),
-        ("caninec", "google/canine-c"),
+        # ("caninec", "google/canine-c"),
     ]
 
     for mdl in mdls:

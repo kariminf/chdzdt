@@ -134,16 +134,7 @@ class TokenSeqClassifier(SaveableModel, nn.Module):
         return F.softmax(self.forward(x))
     
 # ---------- Dataset ----------
-class MultipleOutputDataset(Dataset):
-    def __init__(self, embeddings: torch.tensor, multiple_labels: List[np.array]):
-        self.embeddings = embeddings
-        self.multiple_labels = multiple_labels
-    def __len__(self):
-        return len(self.embeddings)
-    def __getitem__(self, idx):
-        emb = self.embeddings[idx]
-        labels = [v[idx] for v in self.multiple_labels]
-        return (emb, *labels)
+
     
 class MultipleOutputClassifier(SaveableModel, nn.Module):
     def __init__(self, shared_params: List[Tuple[str, List[str]]], output_classes):

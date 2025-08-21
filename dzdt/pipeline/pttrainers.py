@@ -21,12 +21,14 @@
 
 import torch
 from torch.nn import Module
+from torch import nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from dataclasses import dataclass
+from typing import List, Any
 
 from dzdt.pipeline.recorders import Recorder
-from dzdt.pipeline.preprocessor import Embedder
+from dzdt.pipeline.preprocessor import Embedder, ClsTokEmbedder
 
 @dataclass
 class SimpleTrainerConfig:
@@ -43,48 +45,148 @@ class SimpleTrainer:
         self.device = device
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = config.model 
-        self.data_loader = config.data_loader
-        self.optimizer = config.optimizer
-        self.criterion = config.criterion
-        self.embedder = config.embedder
-        self.recorder = config.recorder
+        self.config = config 
 
-        self.model.to(self.device)
+        self.config.model.to(self.device)
+        self.config.model.train()
 
     def step(self, X, y):
         X, y = X.to(self.device), y.to(self.device)
-        self.optimizer.zero_grad()
-        pred = self.model(X)
+        self.config.optimizer.zero_grad()
+        pred = self.config.model(X)
         # print("X.shape", X.shape, "pred.shape", pred.shape, " y.shape", y.shape)
-        loss = self.criterion(pred, y)
+        loss = self.config.criterion(pred, y)
         loss.backward()
-        self.optimizer.step()
+        self.config.optimizer.step()
 
         return loss.item()
 
     def epoch(self):
         epoch_loss = 0.0
-        for X, y in self.data_loader: #batch
+        total_size = 0
+        for X, y in self.config.data_loader: #batch
             loss = self.step(X, y)
-            epoch_loss += loss * X.size(0)
+            s = X.size(0)
+            epoch_loss += loss * s
+            total_size += s
 
-        return epoch_loss / len(self.data_loader)
+        return epoch_loss / total_size
 
     def epoch_stream(self):
         epoch_loss = 0.0
-        for text, y in self.data_loader: #batch
-            X = self.embedder.encode(text)
+        total_size = 0
+        for text, y in self.config.data_loader: #batch
+            X = self.config.embedder.encode(text)
             loss = self.step(X, y)
-            epoch_loss += loss * X.size(0)
+            s = X.size(0)
+            epoch_loss += loss * s
+            total_size += s
 
-        return epoch_loss
+        return epoch_loss / total_size
 
-    def train(self, epochs=100, gamma = None, stream=False):
-        self.recorder.start()
+    def train(self, epochs=100, gamma = None):
+        self.config.recorder.start()
         for epoch in range(epochs):
-            epoch_loss = self.epoch_stream() if stream else self.epoch()
-            self.recorder.record(epoch, epochs, epoch_loss)
+            epoch_loss = self.epoch_stream() if self.config.stream else self.epoch()
+            self.config.recorder.record(epoch, epochs, epoch_loss)
             if gamma is not None and epoch_loss <= gamma:
                 break
-        self.recorder.finish()
+        self.config.recorder.finish()
+
+
+@dataclass
+class ClsTokMultiTrainerConfig:
+    cls_model: Module
+    tok_model: Module
+    cls_optimizer: Optimizer
+    tok_optimizer: Optimizer
+    data_loader: DataLoader
+    output_features: List[str]
+    embedder: ClsTokEmbedder = None
+    recorder: Recorder = Recorder()
+    stream: bool = False
+
+    
+class ClsTokMultiTrainer:
+    def __init__(self, config: ClsTokMultiTrainerConfig, device=None):
+        self.device = device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.config = config 
+
+        self.config.cls_model.to(self.device)
+        self.config.tok_model.to(self.device)
+        
+        self.config.cls_model.train()
+        self.config.tok_model.train()
+
+        self.multiclass_criterion = nn.CrossEntropyLoss()
+        self.binary_criterion = nn.BCEWithLogitsLoss()
+
+    def step_one(self, X, y, model, optimizer):
+        X = X.to(self.device)
+        losses = [0.0] * len(self.config.output_features)
+        optimizer.zero_grad()
+        pred = model(X)
+        loss = 0.0
+        for j, feature in enumerate(self.config.output_features):
+
+            if pred[feature].shape[-1] == 1:
+                lossi = self.binary_criterion(pred[feature].squeeze(), y[j])
+            else:
+                lossi = self.multiclass_criterion(pred[feature], y[j])
+            losses[j] += lossi.item()
+            loss += lossi
+        loss.backward()
+        optimizer.step()
+        return losses
+
+    def step(self, X, y):
+        X_cls, X_tok = X
+        cls_losses = self.step_one(X_cls, y, self.config.cls_model, self.config.cls_optimizer)
+        tok_losses = self.step_one(X_tok, y, self.config.tok_model, self.config.tok_optimizer)
+
+        return cls_losses, tok_losses
+
+    def epoch(self):
+        cls_epoch_losses = [0.0] * len(self.config.output_features)
+        tok_epoch_losses = [0.0] * len(self.config.output_features)
+        data_size = len(self.config.data_loader.dataset)
+        for data in self.config.data_loader: #batch
+            X = data[0]
+            y = [d.to(self.device) for d in data[1:]]
+            cls_losses, tok_losses = self.step(X, y)
+
+            weight = len(X[0])/data_size
+
+            for i in range(len(self.config.output_features)):
+                cls_epoch_losses[i] += cls_losses[i] * weight
+                tok_epoch_losses[i] += tok_losses[i] * weight
+
+        return cls_epoch_losses, tok_epoch_losses
+
+    def epoch_stream(self):
+        cls_epoch_losses = [0.0] * len(self.config.output_features)
+        tok_epoch_losses = [0.0] * len(self.config.output_features)
+        data_size = len(self.config.data_loader.dataset)
+        for data in self.config.data_loader: #batch
+            X = self.config.embedder.encode(data[0])
+            y = [d.to(self.device) for d in data[1:]]
+            cls_losses, tok_losses = self.step(X, y)
+
+            weight = len(X[0])/data_size
+
+            for i in range(len(self.config.output_features)):
+                cls_epoch_losses[i] += cls_losses[i] * weight
+                tok_epoch_losses[i] += tok_losses[i] * weight
+
+        return cls_epoch_losses, tok_epoch_losses
+
+
+    def train(self, epochs=100, gamma = None):
+        self.config.recorder.start()
+        for epoch in range(epochs):
+            cls_epoch_losses, tok_epoch_losses = self.epoch_stream() if self.config.stream else self.epoch()
+            self.config.recorder.record(epoch, epochs, (self.config.output_features, cls_epoch_losses, tok_epoch_losses))
+        self.config.recorder.finish()
+

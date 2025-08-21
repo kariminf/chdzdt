@@ -56,13 +56,13 @@ from dzdt.pipeline.pttesters import SimpleTesterConfig, SimpleTester
 
 
 def train(params):
+    print("Encoding PoS labels ...")
     label_encoder = LabelEncoder()
 
     Y = encode_tags(label_encoder, params.tags, train=True)
 
     # print(np.array(tags).shape, Y.shape)
     # exit(0)
-
 
     decoder_params = dict(
         input_dim=768,
@@ -103,9 +103,10 @@ def train(params):
         stream=True,
     )
 
+    print("Training PoS model ...")
     trainer = SimpleTrainer(config)
 
-    trainer.train(epochs=params.epochs, gamma=params.gamma, stream=params.stream)
+    trainer.train(epochs=params.epochs, gamma=params.gamma)
 
     print("saving models ...")
     pos_decoder.save(os.path.join(params.mdl_url, "pos_model.pt"))
@@ -173,7 +174,7 @@ def test_main(args):
     input_url: str  = os.path.expanduser(args.input)
 
     print("Loading the data ...")
-    words, tags = get_tagging_data(input_url, max_words=120)
+    words, tags = get_tagging_data(input_url, max_words=60)
 
     mdl_url = os.path.join(output_url, args.m)
 
@@ -198,7 +199,7 @@ def test_main(args):
         else:
             raise AttributeError("Cannot determine embedding dimension from encoder/model.")
         
-        params.epochs=100
+        params.epochs=10
         params.gamma=0.1
         params.emb_d = emb_d
         train(params)   

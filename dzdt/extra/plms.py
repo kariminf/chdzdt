@@ -288,3 +288,15 @@ def load_model(url):
 #         seq_encoding = self.seq_encoder()
 
 #         return self.tokenizer1(text, **kwds), self.tokenizer2(text, **kwds)
+
+
+def get_embedding_size(encoder):
+    if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
+        emb_d = encoder.config.hidden_size
+    elif hasattr(encoder, "hidden_size"):
+        emb_d = encoder.hidden_size
+    elif hasattr(encoder, "d_model"):
+        emb_d = encoder.d_model
+    else:
+        raise AttributeError("Cannot determine embedding dimension from encoder/model.")
+    return emb_d
