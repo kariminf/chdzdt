@@ -40,22 +40,25 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from dzdt.extra.data import get_tagging_data
 from dzdt.model.classif import SimpleClassifier, TokenSeqClassifier
-from dzdt.extra.plms import load_model
+from dzdt.extra.plms import get_embedding_size, load_model
 from dzdt.extra.encode import encode_tags
 from dzdt.tools.struct import ObjectDict
 from dzdt.pipeline.recorders import BatchPrinter, WritePrintRecorder
 from dzdt.pipeline.ptdatasets import SimpleDataset
-from dzdt.pipeline.preprocessor import Embedder
-from dzdt.pipeline.pttrainers import SimpleTrainerConfig, SimpleTrainer
-from dzdt.pipeline.pttesters import SimpleTesterConfig, SimpleTester
+from dzdt.pipeline.preprocessor import DzDTEmbedder, BertEmbedder
+from dzdt.pipeline.pttrainers import SimpleTrainerConfig, SimpleTrainer, MaskedSimpleTrainer
+from dzdt.pipeline.pttesters import SimpleTesterConfig, SimpleTester, MaskedSimpleTester
 
 
 # =======================================================================
-#    Functions 
+#    Training 
 # =======================================================================
 
+def collate_batch(batch):
+        sentences, labels = zip(*batch)   # unzip
+        return list(sentences), torch.tensor(labels, dtype=torch.long)
 
-def train(params):
+def train_model(params):
     print("Encoding PoS labels ...")
     label_encoder = LabelEncoder()
 
@@ -63,6 +66,13 @@ def train(params):
 
     # print(np.array(tags).shape, Y.shape)
     # exit(0)
+
+    data_loader = DataLoader(SimpleDataset(params.sent_words, Y), 
+                             batch_size=params.batch_size, 
+                             shuffle=True, collate_fn=collate_batch)
+
+    PAD_IDX = label_encoder.transform(["<PAD>"])[0]
+    loss_func = nn.CrossEntropyLoss()
 
     decoder_params = dict(
         input_dim=768,
@@ -73,38 +83,57 @@ def train(params):
     )
 
     if params.seq:
+
+        emb_d = get_embedding_size(params.embedder.encoder)
         encoder_params = dict(
-            input_dim=params.emb_d,
+            input_dim=emb_d,
             hidden_dim=384,
             num_layers=1,
             dropout=0.2,
         )
         pos_decoder = TokenSeqClassifier(encoder_params, decoder_params)
-    else:
-        pos_decoder = SimpleClassifier(decoder_params)
 
-    data_loader = DataLoader(SimpleDataset(params.words, Y), batch_size=params.batch_size, shuffle=True)
-
-    PAD_IDX = label_encoder.transform(["<PAD>"])[0]
+        def my_loss(logits, targets):
+            logits = logits.view(-1, len(label_encoder.classes_))
+            targets = targets.view(-1)
+            return loss_func(logits, targets)
+        
+        config = SimpleTrainerConfig(
+            model = pos_decoder,
+            optimizer = torch.optim.Adam(pos_decoder.parameters(), lr=1e-3),
+            criterion = my_loss,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            recorder=WritePrintRecorder(os.path.join(params.mdl_url, "logs")),
+            stream=True,
+        )
+        trainer = SimpleTrainer(config)
     
-    loss_func = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-    def my_loss(logits, targets):
-        logits = logits.view(-1, len(label_encoder.classes_))
-        targets = targets.view(-1)
-        return loss_func(logits, targets)
+    else:
+        pos_decoder = SimpleClassifier(**decoder_params)
 
-    config = SimpleTrainerConfig(
-        model=pos_decoder,
-        data_loader=data_loader,
-        optimizer=torch.optim.Adam(pos_decoder.parameters(), lr=1e-3),
-        criterion=my_loss,
-        embedder=params.embedder,
-        recorder=WritePrintRecorder(os.path.join(params.mdl_url, "logs")),
-        stream=True,
-    )
+        def my_loss(logits_mask, targets):
+            logits, mask = logits_mask
+            # flatten
+            logits = logits.view(-1, logits.size(-1))   # [B*T, N]
+            targets = targets.view(-1)                  # [B*T]
+            mask = mask.view(-1)                        # [B*T]
+            mask2 = targets != PAD_IDX
+
+            return loss_func(logits[mask], targets[mask2])
+        
+        config = SimpleTrainerConfig(
+            model = pos_decoder,
+            optimizer = torch.optim.Adam(pos_decoder.parameters(), lr=1e-3),
+            criterion = my_loss,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            recorder=WritePrintRecorder(os.path.join(params.mdl_url, "logs")),
+            stream=True,
+        )
+        trainer = MaskedSimpleTrainer(config)
 
     print("Training PoS model ...")
-    trainer = SimpleTrainer(config)
 
     trainer.train(epochs=params.epochs, gamma=params.gamma)
 
@@ -114,100 +143,149 @@ def train(params):
     print("Saving label encoders ...")
     joblib.dump(label_encoder, os.path.join(params.mdl_url, "label_encoder.pkl"))
         
+# =======================================================================
+#    Testing 
+# =======================================================================
 
-def test(params):
+def test_model(params):
     print("testing the classification model ...")
 
     label_encoder: LabelEncoder = joblib.load(os.path.join(params.mdl_url, "label_encoder.pkl"))
 
     Y = encode_tags(label_encoder, params.tags)
 
-    if params.seq:
-        pos_decoder = TokenSeqClassifier.load(os.path.join(params.mdl_url, "pos_model.pt"))
-    else:
-        pos_decoder = SimpleClassifier.load(os.path.join(params.mdl_url, "pos_model.pt"))
-
-
-    data_loader = DataLoader(SimpleDataset(params.words, Y), batch_size=params.batch_size, shuffle=False)
-
+    data_loader = DataLoader(SimpleDataset(params.sent_words, Y), 
+                             batch_size=params.batch_size, 
+                             shuffle=False, collate_fn=collate_batch)
     PAD_IDX = label_encoder.transform(["<PAD>"])[0]
 
-    def classif_report(Y_true, Y_pred):
-        return classification_report(Y_true, Y_pred, target_names=label_encoder.classes_, zero_division=0, digits=4)
+    if params.seq:
+        pos_decoder = TokenSeqClassifier.load(os.path.join(params.mdl_url, "pos_model.pt"))
+        def classif_report(Y_true, Y_pred):
+            Y_true_fltn = np.array(Y_true).flatten()
+            Y_pred_fltn = np.array(Y_pred).flatten()
+            mask = Y_true_fltn != PAD_IDX
+            # print("PAD_IDX", PAD_IDX, label_encoder.classes_, np.unique(Y_true_fltn), np.unique(Y_pred_fltn))
+            return classification_report(Y_true_fltn[mask], Y_pred_fltn[mask], 
+                                        target_names=label_encoder.classes_, 
+                                        labels=range(len(label_encoder.classes_)),
+                                        zero_division=0, digits=4)
+        config = SimpleTesterConfig(
+            model=pos_decoder,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            stream=True,
+            recorder=BatchPrinter(),
+            criteria=[classif_report],
+        )
+        tester = SimpleTester(config)
+    else:
+        pos_decoder = SimpleClassifier.load(os.path.join(params.mdl_url, "pos_model.pt"))
+        def classif_report(Y_true, Y_pred):
+            Y_true_fltn = np.array(Y_true).flatten()
+            mask2 = Y_true_fltn != PAD_IDX
+            Y_true_fltn = Y_true_fltn[mask2].tolist()
+            return classification_report(Y_true_fltn, Y_pred, 
+                                        target_names=label_encoder.classes_, 
+                                        labels=range(len(label_encoder.classes_)),
+                                        zero_division=0, digits=4)
+        config = SimpleTesterConfig(
+            model=pos_decoder,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            stream=True,
+            recorder=BatchPrinter(),
+            criteria=[classif_report],
+        )
+        tester = MaskedSimpleTester(config)
+        
 
-    config = SimpleTesterConfig(
-        model=pos_decoder,
-        data_loader=data_loader,
-        embedder=params.embedder,
-        stream=True,
-        recorder=BatchPrinter(),
-        criteria=[classif_report],
-    )
-
-    tester = SimpleTester(config)
-
-    results = tester.test(epochs=100, gamma=0.1, stream=True)
+    results = tester.test()
 
     with open(os.path.join(params.mdl_url, "test_results.txt"), "w", encoding="utf8") as f:
         f.write(results[0])
 
+# =======================================================================
+#    Main function 
+# ======================================================================= 
 
 
+def main_func(args):
 
-# =============================================
-#          Command line parser
-# =============================================  
+    # if torch.cuda.is_available():
+    #     print("cuda exists")
+    # print("bye")
+    # exit()
 
-
-def test_main(args):
-
-    tokenizer, encoder = load_model(args.p)
+    tokenizer, encoder = load_model(args.p, pretokenized=True)
 
     seq = False
     if "chdzdt" in args.p:
         seq = True
-        embedder = Embedder(tokenizer, encoder, pooling="cls", one_word=True)
+        embedder = DzDTEmbedder(tokenizer, encoder, pooling="cls", one_word=True)
     else:
-        embedder = Embedder(tokenizer, encoder)
+        word_mask = "fast"
+        if "flaubert" in args.p:
+            word_mask = "cmp"
+        embedder = BertEmbedder(tokenizer, encoder, pretokenized=True, word_mask=word_mask)
+
+    # sentences = [
+    #     ["Je", "l'", "aimerais"],
+    #     ["il", "est", "definitivement", "beau"],
+    #     ["cela", "dit"]
+    # ]
+
+    # _, mask = embedder.encode(sentences)
+    # print(mask)
+    # sentences = [
+    # "Les commotions cérébrales sont devenu si courantes dans ce sport qu' on les considére presque comme la routine .".split(),
+    # "L' œuvre est située dans la galerie des de les batailles , dans le château de Versailles .".split()
+    # ]
+
+    # _, mask = embedder.encode(sentences)
+    # print(mask)
+
+
+    # exit(0)
+
 
     output_url: str = os.path.expanduser(args.output)
     input_url: str  = os.path.expanduser(args.input)
 
     print("Loading the data ...")
-    words, tags = get_tagging_data(input_url, max_words=60)
+    sent_words, tags = get_tagging_data(input_url, max_words=60)
+
 
     mdl_url = os.path.join(output_url, args.m)
 
     params = ObjectDict()
     params.seq = seq
     params.mdl_url = mdl_url
-    params.words = words
+    params.sent_words = sent_words
     params.tags = tags
     params.embedder = embedder
 
     params.batch_size = 500
     params.stream=True
 
-    
-    if "train" in args.input:
-        if hasattr(encoder, "config") and hasattr(encoder.config, "hidden_size"):
-            emb_d = encoder.config.hidden_size
-        elif hasattr(encoder, "hidden_size"):
-            emb_d = encoder.hidden_size
-        elif hasattr(encoder, "d_model"):
-            emb_d = encoder.d_model
+    try:
+        if "train" in args.input:
+            print("training the classification model ...")
+            params.epochs=50
+            params.gamma=0.1
+            train_model(params)
         else:
-            raise AttributeError("Cannot determine embedding dimension from encoder/model.")
+            test_model(params)
         
-        params.epochs=10
-        params.gamma=0.1
-        params.emb_d = emb_d
-        train(params)   
+    except KeyboardInterrupt:
+        print("\nInterrupted by user! Cleaning up CUDA...")
+        torch.cuda.empty_cache()
+        sys.exit(0) 
 
-    else:# Test
-        test(params)
 
-        
+# =======================================================================
+#    Command line parser 
+# =======================================================================        
 
  
 parser = argparse.ArgumentParser(description="test morphological clustering using a pre-trained model")
@@ -215,7 +293,7 @@ parser.add_argument("-m", help="model label")
 parser.add_argument("-p", help="model name/path")
 parser.add_argument("input", help="input clusters' file")
 parser.add_argument("output", help="output txt file containing the results")
-parser.set_defaults(func=test_main)
+parser.set_defaults(func=main_func)
 # parser.set_defaults(func=test_other)
 
 
@@ -227,14 +305,26 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
+    # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-test.txt"
-    dst = "~/Data/DZDT/results/pos-tag/arabic"
+    # dst = "~/Data/DZDT/results/pos-tag/arabic"
+
+    # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-train.txt"
+    # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-test.txt"
+    # dst = "~/Data/DZDT/results/pos-tag/arabizi"
+
+    # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-train.txt"
+    # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-test.txt"
+    # dst = "~/Data/DZDT/results/pos-tag/english"
+
+    # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
+    src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
+    dst = "~/Data/DZDT/results/pos-tag/french"
 
     mdls = [
         # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
         # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
         # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
         # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
@@ -244,7 +334,7 @@ if __name__ == "__main__":
         # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
         # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
-        # ("flaubert", "flaubert/flaubert_base_uncased"),
+        ("flaubert", "flaubert/flaubert_base_uncased"),
         # ("dziribert", "alger-ia/dziribert"),
         # ("caninec", "google/canine-c"),
     ]

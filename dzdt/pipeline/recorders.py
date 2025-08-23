@@ -63,6 +63,26 @@ class MultiWritePrintRecorder(Recorder):
         
         print(f"Epoch [{nbr+1}/{total_nbr}], Total cls Loss: {cls_loss:.4f}, Total tok Loss: {tok_loss:.4f}")
 
+class FTMultiWritePrintRecorder(Recorder):
+    def __init__(self, url):
+        from torch.utils.tensorboard import SummaryWriter
+        os.makedirs(url, exist_ok=True)
+        self.writer = SummaryWriter(url)
+    def finish(self):
+        self.writer.close()
+    def record(self, nbr, total_nbr, loss):
+        output_features, epoch_losses = loss
+
+        loss = 0.0
+        for i, feature in enumerate(output_features):
+            lossi = epoch_losses[i]
+            self.writer.add_scalar(f"{feature} loss/ train", lossi, nbr)
+            loss += lossi
+
+        self.writer.add_scalar("Total loss/ train", loss, nbr)
+        
+        print(f"Epoch [{nbr+1}/{total_nbr}], Total Loss: {loss:.4f}")
+
 class BatchPrinter(Recorder):
     def record(self, nbr):
         print(f"Batch {nbr} ...")

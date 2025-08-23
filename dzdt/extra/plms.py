@@ -63,7 +63,7 @@ def load_bertlike_model(plm_loc: str) -> Tuple[BertTokenizer, BertModel]:
         Tuple[BertTokenizer, BertModel]: A tuple containing the tokenizer and the model.
     """
     plm_loc = os.path.expanduser(plm_loc)
-    tokenizer = AutoTokenizer.from_pretrained(plm_loc)
+    tokenizer = AutoTokenizer.from_pretrained(plm_loc, use_fast=True)
     model = AutoModelForMaskedLM.from_pretrained(plm_loc)
     if isinstance(model, BertModel):
         return tokenizer, model
@@ -241,15 +241,19 @@ def get_sent_seq_embeddings(sentences: List[str], tokenizer: BertTokenizer, enco
 
 class AraBertTokenizer:
     def __init__(self, tokenizer, araberturl):
-        self.tokenizer = tokenizer
+        self.tokenizer = tokenizer 
         self.araberturl = araberturl
+        self.special_tokens_map = tokenizer.special_tokens_map
 
     def __call__(self, text, **kwds):
         text = arabert_preprocess(text, self.araberturl)
         return self.tokenizer(text, **kwds)
     
+    def convert_ids_to_tokens(self, *args):
+        return self.tokenizer.convert_ids_to_tokens(*args)
+    
 
-def load_model(url):
+def load_model(url, pretokenized=False):
     if "chdzdt" in url:
         print("loading CHDZDT model ...")
         tokenizer, model = load_chdzdt_model(url)
@@ -260,7 +264,7 @@ def load_model(url):
         print("loading BERT-like model ...")
         tokenizer, model = load_bertlike_model(url)
 
-        if "arabert" in url: 
+        if ("arabert" in url) and (not pretokenized): 
             print("adding AraBERT normalization ...")
             tokenizer = AraBertTokenizer(tokenizer, url)
 

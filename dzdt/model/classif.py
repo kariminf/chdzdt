@@ -4,6 +4,13 @@ import torch.nn.functional as F
 from typing import List, Tuple
 from torch.utils.data import Dataset
 import numpy as np
+import os
+
+from transformers import configuration_utils, modeling_utils
+from dzdt.extra.plms import get_embedding_size, load_chdzdt_model, load_model
+from dzdt.model.chdzdt_mdl import MLMLMBertModel
+from dzdt.model.chdzdt_tok import CharTokenizer
+from dzdt.tools.const import char_tokenizer_config
 
 
 class SaveableModel:
@@ -170,6 +177,46 @@ class MultipleOutputClassifier(SaveableModel, nn.Module):
             output[name] = out_layer(out)
 
         return output
+    
+
+class FTMultipleOutputClassifier(MultipleOutputClassifier):
+    def __init__(self, shared_params, output_classes, encoder_url: str):
+
+        tokenizer, encoder = load_chdzdt_model(encoder_url)
+
+        if shared_params["input_dim"] is None:
+            shared_params["input_dim"] = get_embedding_size(encoder)
+        super().__init__(shared_params, output_classes)
+        self.encoder = encoder
+        self.tokenizer = tokenizer
+
+
+    def save(self, path: str):
+        super().save(os.path.join(path, "classif_model.pt"))
+        char_tokenizer_config()
+        self.encoder.save_pretrained(path, safe_serialization=False)
+        self.tokenizer.save(os.path.join(path, "char_tokenizer.pkl"))
+
+    @classmethod
+    def load(cls, path: str, map_location=None):
+        mdl_url = os.path.join(path, "classif_model.pt")
+        checkpoint = torch.load(mdl_url, map_location=map_location)
+        obj = cls(**checkpoint["params"], encoder_url=path)
+        obj.load_state_dict(checkpoint["state_dict"])
+        return obj    
+
+    def tokenize(self, text):
+        return self.tokenizer(
+            text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=True
+        )
+
+    def forward(self, tokens):
+        x = self.encoder(**tokens).last_hidden_state[:, 0, :]
+        return super().forward(x)
     
 
 

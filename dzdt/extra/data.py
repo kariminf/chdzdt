@@ -55,6 +55,7 @@ def get_word_noisy_data(url: str) -> Tuple[List[str], List[str], List[str]]:
 def get_tagging_data(url: str, max_words=None) -> Tuple[List[List[str]], List[List[str]]]:
     url = os.path.expanduser(url)
     X_words, Y_tags = [], []
+    i = 1
     with open(url, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -63,6 +64,9 @@ def get_tagging_data(url: str, max_words=None) -> Tuple[List[List[str]], List[Li
 
             words, tags = line.split("\t")
             words, tags = words.split(), tags.split()
+
+            if len(words) != len(tags):
+                continue
             
             if max_words is not None:
                 l = len(words)
@@ -70,7 +74,7 @@ def get_tagging_data(url: str, max_words=None) -> Tuple[List[List[str]], List[Li
                     words, tags = words[:max_words], tags[:max_words]
                 else: # >=
                     l = max_words - l
-                    words, tags = words + (["<PAD>"] * l), tags + (["<PAD>"] * l)
+                    words, tags = words + ([""] * l), tags + (["<PAD>"] * l)
             X_words.append(words)
             Y_tags.append(tags)
     return X_words, Y_tags

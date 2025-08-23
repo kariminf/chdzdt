@@ -75,7 +75,51 @@ class SimpleTester:
                 pred = torch.sigmoid(pred).squeeze(-1)
                 pred = (pred > 0.5).long().cpu().tolist()
             else:
-                pred = pred.argmax(dim=1).cpu().tolist()
+                pred = pred.argmax(dim=-1).cpu().tolist()
+
+            all_preds.extend(pred)
+            all_labels.extend(batch_Y)
+
+        results = []
+        for criterion in self.config.criteria:
+            results.append(criterion(all_labels, all_preds))
+
+        self.config.recorder.finish()
+        return results
+    
+class MaskedSimpleTester(SimpleTester):
+    def forward(self, X):
+        X = X.to(self.device)
+        with torch.no_grad():
+            pred = self.config.model(X)
+        return pred
+
+    def forward_stream(self, text):
+        X, mask = self.config.embedder.encode(text)
+        return self.forward(X), mask
+
+    def test(self):
+        self.config.recorder.start()
+        all_preds, all_labels, all_masks = [], [], []
+        i = 0
+        for data in self.config.data_loader:
+            i += 1
+            self.config.recorder.record(i)
+            if self.config.stream:
+                batch_X, batch_Y = data
+                pred, batch_mask = self.forward_stream(batch_X)
+            else:
+                batch_X, batch_mask, batch_Y = data
+                pred = self.forward(batch_X)
+
+            if pred.shape[-1] == 1:
+                # binary: one logit
+                pred = torch.sigmoid(pred).squeeze(-1)
+                pred = (pred > 0.5).long().cpu().view(-1)
+            else:
+                pred = pred.argmax(dim=-1).cpu().view(-1)
+
+            pred = pred[batch_mask.view(-1)].tolist()
 
             all_preds.extend(pred)
             all_labels.extend(batch_Y)
@@ -227,4 +271,73 @@ class ClsTokMultiTester:
             results.append(criterion(all_labels, (all_preds_cls, all_preds_tok)))
 
         self.recorder.finish()
+        return results
+    
+
+@dataclass
+class FTMultiTesterConfig:
+    model: Module
+    data_loader: DataLoader
+    output_features: List[str]
+    criteria: List[Any] = None
+    recorder: Recorder = Recorder()
+    stream: bool = False
+    
+class FTMultiTester:
+    def __init__(self, config: FTMultiTesterConfig, device=None):
+        self.device = device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.config = config
+        self.config.model.to(self.device)
+        self.config.model.eval()
+
+
+    def forward(self, X):
+        X  = X.to(self.device)
+        with torch.no_grad():
+            y = self.config.model(X)
+        return y
+
+    def forward_stream(self, text):
+        return self.forward(self.config.model.tokenize(text))
+
+    def test(self):
+        self.config.recorder.start()
+        all_labels = {}
+        all_preds  = {}
+
+        for feature in self.config.output_features:
+            all_preds[feature] = []
+            all_labels[feature] = []
+
+        i = 0
+        for data in self.config.data_loader:
+            i += 1
+            self.config.recorder.record(i)
+            pred = self.forward_stream(data[0]) if self.config.stream else self.forward(data[0])
+
+            for j, feature in enumerate(self.config.output_features):
+
+                predi = pred[feature].detach().cpu()
+
+                if predi.shape[-1] == 1:
+                    # binary: one logit
+                    predi = torch.sigmoid(predi).squeeze(-1)
+                    predi = (predi > 0.5).long().tolist()
+                else:
+                    predi = np.argmax(predi, axis=1).tolist()
+
+                all_preds[feature].extend(predi)
+
+                y = data[1:][j]
+                if not isinstance(y, list):
+                    y = y.tolist()
+                all_labels[feature].extend(y)
+
+        results = []
+        for criterion in self.config.criteria:
+            results.append(criterion(all_labels, all_preds))
+
+        self.config.recorder.finish()
         return results
