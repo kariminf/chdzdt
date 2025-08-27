@@ -50,6 +50,7 @@ def arramooz_extract_table(clusters: Dict[str, Set[str]], in_url: str, table: st
             clusters[root].add(word)
 
 def arramooz_extract_table_nounwordtype(clusters: Dict[str, Set[str]], in_url: str):
+    """extract nouns by form (type)"""
     Data = get_sqlite3_data(in_url, "nouns")
     for index, row in Data.iterrows():
         wtype, word = row["wordtype"], row["unvocalized"]
@@ -156,24 +157,6 @@ parser.set_defaults(func=process_extract)
 
 if __name__ == "__main__":
 
-    # ILOC = "~/Data/DZDT/test/arramooz/data/arabicdictionary.sqlite"
-    # ILOC = "~/Data/DZDT/test/MorphyNet/eng/eng.derivational.v1.tsv"
-    # ILOC = "~/Data/DZDT/test/MorphyNet/fra/fra.derivational.v1.tsv"
-    ILOC = "~/Data/DZDT/test/qutrub/allverbs2/allverbs.txt"
-    # OLOC = "~/Data/DZDT/test/morphology/arabic_derivation_clusters34.csv"
-    OLOC = "~/Data/DZDT/test/morphology/arabic/ar_infl_wr_min100.csv"
-
     argv = sys.argv[1:]
-
-    argv = [
-        "-t", "qutrub", #"arramooz",
-        "-n", "99", #"77", 
-        "-f", "all",
-        ILOC,
-        OLOC
-    ]
-
     args = parser.parse_args(argv)
-    # print(args)
-    # parser.print_help()
     args.func(args)
