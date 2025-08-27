@@ -40,7 +40,7 @@ from dzdt.model.chdzdt_mdl import MLMLMBertModel
 
 from dzdt.extra.plms import arabert_preprocess, load_bertlike_model, load_canine_model, load_chdzdt_model, get_oneword_embeddings
 from dzdt.extra.data import get_word_cluster_data, get_word_noisy_data
-from dzdt.extra.stats import cosine_similarity, kmeans_ars, silhouette, cluster_cos_euc
+from dzdt.extra.stats import cosine_similarity, kmeans_ari, silhouette, cluster_cos_euc
 
 
 
@@ -107,8 +107,8 @@ def test_word_clustering(args):
 
  
     print("calculating ASR over KMeans ...")
-    cls_ars = kmeans_ars(words_cls_emb, true_labels)
-    tok_ars = kmeans_ars(words_tok_emb, true_labels)
+    cls_ari = kmeans_ari(words_cls_emb, true_labels)
+    tok_ari = kmeans_ari(words_tok_emb, true_labels)
 
     print("calculating sil ...")
     cls_sil = silhouette(words_cls_emb, true_labels)
@@ -123,14 +123,14 @@ def test_word_clustering(args):
 
         out_f.write("\n\nResults:\n")
         out_f.write("==================================\n")
-        out_f.write("\nembedding\tKMeans+ASR\tSil\tAvg. Cos.\Avg. Euc.\n")
-        out_f.write(f"CLS\t{cls_ars}\t{cls_sil}\t{cls_cos}\t{cls_euc}\n")
+        out_f.write("\nembedding\tKMeans+ARI\tSil\tAvg. Cos.\Avg. Euc.\n")
+        out_f.write(f"CLS\t{cls_ari}\t{cls_sil}\t{cls_cos}\t{cls_euc}\n")
 
         # if "chdzdt" not in args.m:
-        out_f.write(f"Centroid\t{tok_ars}\t{tok_sil}\t{tok_cos}\t{tok_euc}\n")
+        out_f.write(f"Centroid\t{tok_ari}\t{tok_sil}\t{tok_cos}\t{tok_euc}\n")
 
     print("graphical clustering ...")
-    graphical_clustering(words_cls_emb, true_labels, args.output)
+    # graphical_clustering(words_cls_emb, true_labels, args.output)
 
 
 def test_word_noise(args):
@@ -223,40 +223,67 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    # d = "en_infl_wr"
+    # d, ss = "ar_infl_wr", ["avg75", "min100"]
+    # d, ss = "ar_deriv_nr", ["avg15", "min30"]
+    # src = "~/Data/DZDT/test/morphology/arabic/"
+
+    # d, ss = "en_infl_wr", ["avg6", "min7"]
+    # d, ss = "en_deriv_wr", ["avg30", "min78"]
     # src = "~/Data/DZDT/test/morphology/english/"
-    # dst = "~/Data/DZDT/results/morph/en_infl_wr/"
 
-    d = "ar_taboo"
-    src = "~/Data/DZDT/test/lexicon/arabic/"
-    dst = "~/Data/DZDT/results/lexicon/arabic/noise/"
+    # d, ss = "fr_infl_wr", ["avg40", "min42"]
+    # d, ss = "fr_deriv_wr", ["avg15", "min30"]
+    # src = "~/Data/DZDT/test/morphology/french/"
 
+
+    # dst = f"~/Data/DZDT/results/morph-consist/{d}/"
+
+
+    # ========================================
+    ss = ["cls"] # ["noise"]
+    # d = "ar_taboo"
+    # src = "~/Data/DZDT/test/lexicon/arabic/"
+    # dst = "~/Data/DZDT/results/lexicon/arabic/noise/"
+
+    d = "dz_taboo"
+    src = "~/Data/DZDT/test/lexicon/arabizi/"
+    dst = "~/Data/DZDT/results/lexicon/arabizi/"
+
+    # d = "en_taboo"
+    # src = "~/Data/DZDT/test/lexicon/english/"
+    # dst = "~/Data/DZDT/results/lexicon/english/"
+
+    # d = "fr_taboo"
+    # src = "~/Data/DZDT/test/lexicon/french/"
+    # dst = "~/Data/DZDT/results/lexicon/french/"
+
+    
     mdls = [
-        ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
-        ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
-        # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
-        # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
-        # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
-        # ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
-        # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
-        # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
-        # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
-        ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
+        # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
+        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
+        ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
+        ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
+        ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
+        ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
+        ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
+        ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
+        # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),
-        ("dziribert", "alger-ia/dziribert"),
-        ("caninec", "google/canine-c"),
+        # ("dziribert", "alger-ia/dziribert"),
+        # ("caninec", "google/canine-c"),
     ]
 
-    for s in ["noise"]: #"full", "avg15", "min30"
+    for s in ss: #"full", 
         for mdl in mdls:
             print(f"Testing model {mdl[0]} on data with {d}_{s} clusters ...")
             argv = [
-                "-t", "noise",
+                "-t", "cluster",
                 "-m", mdl[1],
                 f"{src}{d}_{s}.csv",
-                f"{dst}{d}_{s}_{mdl[0]}"
+                f"{dst}/{s}/{d}_{s}_{mdl[0]}"
                 ]
             args = parser.parse_args(argv)
             args.func(args)

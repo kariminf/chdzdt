@@ -122,6 +122,48 @@ class TokenSimpleClassifier(SaveableModel, nn.Module):
     def predict(self, x):
         return F.softmax(self.forward(x))
     
+
+class FTTokenSimpleClassifier(TokenSimpleClassifier):
+    def __init__(self, encoder_params, classifier_params, encoder_url: str):
+
+        tokenizer, char_encoder = load_chdzdt_model(encoder_url)
+
+        if encoder_params["input_dim"] is None:
+            encoder_params["input_dim"] = get_embedding_size(char_encoder)
+        super().__init__(encoder_params, classifier_params)
+        self.char_encoder = char_encoder
+        self.tokenizer = tokenizer
+        # Saves ~50% memory at the cost of slower training (recomputes activations during backprop).
+        self.char_encoder.gradient_checkpointing_enable()
+
+    def save(self, path: str):
+        super().save(os.path.join(path, "classif_model.pt"))
+        char_tokenizer_config()
+        self.char_encoder.save_pretrained(path, safe_serialization=False)
+        self.tokenizer.save(os.path.join(path, "char_tokenizer.pkl"))
+
+    @classmethod
+    def load(cls, path: str, map_location=None):
+        mdl_url = os.path.join(path, "classif_model.pt")
+        checkpoint = torch.load(mdl_url, map_location=map_location)
+        obj = cls(**checkpoint["params"], encoder_url=path)
+        obj.load_state_dict(checkpoint["state_dict"])
+        return obj    
+
+    def tokenize_encode(self, text, device):
+        batch_size, seq_size = len(text), len(text[0])
+        text = np.array(text).flatten()
+        tokens = self.tokenizer(
+            text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=True
+        ).to(device)
+        # This avoids storing extra hidden states.
+        emb = self.char_encoder(**tokens, output_hidden_states=False, output_attentions=False)
+        return emb.last_hidden_state[:, 0, :].view(batch_size, seq_size, -1)
+    
 class TokenSeqClassifier(SaveableModel, nn.Module):
     def __init__(self, encoder_params, classifier_params):
         super().__init__()
@@ -140,7 +182,47 @@ class TokenSeqClassifier(SaveableModel, nn.Module):
     def predict(self, x):
         return F.softmax(self.forward(x))
     
-# ---------- Dataset ----------
+
+class FTTokenSeqClassifier(TokenSeqClassifier):
+    def __init__(self, encoder_params, classifier_params, encoder_url: str):
+
+        tokenizer, char_encoder = load_chdzdt_model(encoder_url)
+
+        if encoder_params["input_dim"] is None:
+            encoder_params["input_dim"] = get_embedding_size(char_encoder)
+        super().__init__(encoder_params, classifier_params)
+        self.char_encoder = char_encoder
+        self.tokenizer = tokenizer
+        # Saves ~50% memory at the cost of slower training (recomputes activations during backprop).
+        self.char_encoder.gradient_checkpointing_enable()
+
+    def save(self, path: str):
+        super().save(os.path.join(path, "classif_model.pt"))
+        char_tokenizer_config()
+        self.char_encoder.save_pretrained(path, safe_serialization=False)
+        self.tokenizer.save(os.path.join(path, "char_tokenizer.pkl"))
+
+    @classmethod
+    def load(cls, path: str, map_location=None):
+        mdl_url = os.path.join(path, "classif_model.pt")
+        checkpoint = torch.load(mdl_url, map_location=map_location)
+        obj = cls(**checkpoint["params"], encoder_url=path)
+        obj.load_state_dict(checkpoint["state_dict"])
+        return obj    
+
+    def tokenize_encode(self, text, device):
+        batch_size, seq_size = len(text), len(text[0])
+        text = np.array(text).flatten()
+        tokens = self.tokenizer(
+            text,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=True
+        ).to(device)
+        # This avoids storing extra hidden states.
+        emb = self.char_encoder(**tokens, output_hidden_states=False, output_attentions=False)
+        return emb.last_hidden_state[:, 0, :].view(batch_size, seq_size, -1)
 
     
 class MultipleOutputClassifier(SaveableModel, nn.Module):
@@ -219,17 +301,3 @@ class FTMultipleOutputClassifier(MultipleOutputClassifier):
         return super().forward(x)
     
 
-
-# --- Example usage ---
-if __name__ == "__main__":
-    model = TokenSimpleClassifier(
-        encoder_params={"input_dim": 100, "hidden_dim": 50, "num_layers": 2},
-        classifier_params={"input_dim": 50, "hidden_dim": 20, "output_dim": 3},
-    )
-
-    # Save
-    model.save("token_classifier.pt")
-
-    # Load
-    restored = TokenSimpleClassifier.load("token_classifier.pt")
-    print(restored.params)

@@ -72,7 +72,6 @@ def train_model(params):
                              shuffle=True, collate_fn=collate_batch)
 
     PAD_IDX = label_encoder.transform(["<PAD>"])[0]
-    loss_func = nn.CrossEntropyLoss()
 
     decoder_params = dict(
         input_dim=768,
@@ -93,6 +92,7 @@ def train_model(params):
         )
         pos_decoder = TokenSeqClassifier(encoder_params, decoder_params)
 
+        loss_func = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
         def my_loss(logits, targets):
             logits = logits.view(-1, len(label_encoder.classes_))
             targets = targets.view(-1)
@@ -112,6 +112,7 @@ def train_model(params):
     else:
         pos_decoder = SimpleClassifier(**decoder_params)
 
+        loss_func = nn.CrossEntropyLoss()
         def my_loss(logits_mask, targets):
             logits, mask = logits_mask
             # flatten

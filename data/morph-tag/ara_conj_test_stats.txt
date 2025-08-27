@@ -1,0 +1,37 @@
+number
+SG    24858
+PL    17796
+DU    11439
+Name: count, dtype: int64
+
+mood
+IND     29625
+NA      10655
+JUS      6927
+SBJV     6826
+IMP        60
+Name: count, dtype: int64
+
+aspect
+IPFV    39270
+PFV     14763
+NA         60
+Name: count, dtype: int64
+
+person
+3    24456
+2    19163
+1    10474
+Name: count, dtype: int64
+
+gender
+MASC    25831
+FEM     17788
+NA      10474
+Name: count, dtype: int64
+
+active_voice
+1    45052
+0     9041
+Name: count, dtype: int64
+

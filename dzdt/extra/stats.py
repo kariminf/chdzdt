@@ -53,7 +53,7 @@ def euclidean(emb1: np.ndarray, emb2: np.ndarray) -> float:
     return np.linalg.norm(emb1 - emb2, axis=1).mean()
 
 # returns adjusted rand score over the clusters
-def kmeans_ars(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
+def kmeans_ari(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
 
     # Perform KMeans clustering
     kmeans = KMeans(n_clusters=np.unique(true_labels).size, random_state=42)

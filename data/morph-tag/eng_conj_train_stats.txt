@@ -1,0 +1,31 @@
+tense
+PRS    28700
+PST    28699
+NA     19109
+Name: count, dtype: int64
+
+nonfinite
+0    57399
+1    19109
+Name: count, dtype: int64
+
+singular-number
+0    62158
+1    14350
+Name: count, dtype: int64
+
+third-person
+0    62158
+1    14350
+Name: count, dtype: int64
+
+imperative-subjunctive
+0    57399
+1    19109
+Name: count, dtype: int64
+
+participle
+0    47808
+1    28700
+Name: count, dtype: int64
+

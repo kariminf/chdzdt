@@ -1,0 +1,39 @@
+person
+2     47984
+1     44988
+3     42069
+NA     3014
+Name: count, dtype: int64
+
+aspect
+NA      102061
+IPFV     18001
+PFV      17993
+Name: count, dtype: int64
+
+mood
+IND     72032
+SBJV    35996
+COND    18018
+IMP      8995
+NA       3014
+Name: count, dtype: int64
+
+nonfinite
+0    135041
+1      3014
+Name: count, dtype: int64
+
+tense
+PST    53976
+PRS    36034
+NA     30027
+FUT    18018
+Name: count, dtype: int64
+
+number
+PL    69032
+SG    66009
+NA     3014
+Name: count, dtype: int64
+

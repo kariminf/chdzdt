@@ -47,11 +47,11 @@ from dzdt.extra.data import get_csv_string_data
 from dzdt.model.classif import MultipleOutputClassifier
 from dzdt.extra.plms import load_model, get_embedding_size
 from dzdt.tools.struct import ObjectDict
-from dzdt.pipeline.recorders import BatchPrinter, MultiWritePrintRecorder
+from dzdt.pipeline.recorders import BatchPrinter, MultiWritePrintRecorder, FTMultiWritePrintRecorder
 from dzdt.pipeline.ptdatasets import MultipleOutputDataset
-from dzdt.pipeline.preprocessor import ClsTokEmbedder
-from dzdt.pipeline.pttrainers import ClsTokMultiTrainerConfig, ClsTokMultiTrainer
-from dzdt.pipeline.pttesters import ClsTokMultiTesterConfig, ClsTokMultiTester
+from dzdt.pipeline.preprocessor import ClsTokEmbedder, DzDTEmbedder
+from dzdt.pipeline.pttrainers import ClsTokMultiTrainerConfig, ClsTokMultiTrainer, MultiTrainerConfig, MultiTrainer
+from dzdt.pipeline.pttesters import ClsTokMultiTesterConfig, ClsTokMultiTester, MultiTester, MultiTesterConfig
 
 
 # =======================================================================
@@ -97,28 +97,44 @@ def train(params):
         dropout=0.2
     )
     cls_model = MultipleOutputClassifier(shared_params, output_classes)
-    tok_model = MultipleOutputClassifier(shared_params, output_classes)
+    if params.tok:
+        tok_model = MultipleOutputClassifier(shared_params, output_classes)
 
     data_loader = DataLoader(MultipleOutputDataset(words, outputs), batch_size=params.batch_size, shuffle=True)
 
-    config = ClsTokMultiTrainerConfig(
-        cls_model = cls_model,
-        tok_model = tok_model,
-        cls_optimizer = torch.optim.Adam(cls_model.parameters(), lr=1e-3),
-        tok_optimizer = torch.optim.Adam(tok_model.parameters(), lr=1e-3),
-        data_loader = data_loader,
-        output_features = output_features,
-        embedder = params.embedder,
-        recorder = MultiWritePrintRecorder(os.path.join(params.mdl_url, "logs")),
-        stream  = True,
-    )
+    if params.tok:
+        config = ClsTokMultiTrainerConfig(
+            cls_model = cls_model,
+            tok_model = tok_model,
+            cls_optimizer = torch.optim.Adam(cls_model.parameters(), lr=1e-3),
+            tok_optimizer = torch.optim.Adam(tok_model.parameters(), lr=1e-3),
+            data_loader = data_loader,
+            output_features = output_features,
+            embedder = params.embedder,
+            recorder = MultiWritePrintRecorder(os.path.join(params.mdl_url, "logs")),
+            stream  = True,
+        )
 
-    trainer = ClsTokMultiTrainer(config)
+        trainer = ClsTokMultiTrainer(config)
+    else:
+        config = MultiTrainerConfig(
+            model = cls_model,
+            optimizer = torch.optim.Adam(cls_model.parameters(), lr=1e-3),
+            data_loader = data_loader,
+            output_features = output_features,
+            embedder = params.embedder,
+            recorder = FTMultiWritePrintRecorder(os.path.join(params.mdl_url, "logs")),
+            stream  = True,
+        )
+
+        trainer = MultiTrainer(config)
+
     trainer.train(epochs=params.epochs, gamma=params.gamma)
 
     print("saving models ...")
     cls_model.save(os.path.join(params.mdl_url, "cls_model.pt"))
-    tok_model.save(os.path.join(params.mdl_url, "tok_model.pt"))
+    if params.tok:
+        tok_model.save(os.path.join(params.mdl_url, "tok_model.pt"))
 
     print("Saving label encoders ...")
     joblib.dump(label_encoders, os.path.join(params.mdl_url, "label_encoders.pkl"))
@@ -150,54 +166,82 @@ def test(params):
 
 
     cls_model = MultipleOutputClassifier.load(os.path.join(params.mdl_url, "cls_model.pt"))
-    tok_model = MultipleOutputClassifier.load(os.path.join(params.mdl_url, "tok_model.pt"))
+    if params.tok:
+        tok_model = MultipleOutputClassifier.load(os.path.join(params.mdl_url, "tok_model.pt"))
 
     data_loader = DataLoader(MultipleOutputDataset(words, outputs), batch_size=params.batch_size, shuffle=False)
 
+    if params.tok:
+        def classif_report(Y_true, Y_pred):
+            
+            all_preds_cls, all_preds_tok = Y_pred
+            cls_report, tok_report = {}, {}
+            for feature, classes  in output_classes:
 
-    def classif_report(Y_true, Y_pred):
-        
-        all_preds_cls, all_preds_tok = Y_pred
-        cls_report, tok_report = {}, {}
-        for feature, classes  in output_classes:
+                cls_report[feature] = classification_report(Y_true[feature], 
+                                                            all_preds_cls[feature], 
+                                                            target_names=classes, 
+                                                            zero_division=0,
+                                                            digits=4)
+                tok_report[feature] = classification_report(Y_true[feature], 
+                                                            all_preds_tok[feature], 
+                                                            target_names=classes, 
+                                                            zero_division=0,
+                                                            digits=4)
 
-            cls_report[feature] = classification_report(Y_true[feature], 
-                                                        all_preds_cls[feature], 
+            return (cls_report, tok_report)
+
+        config = ClsTokMultiTesterConfig(
+            cls_model=cls_model,
+            tok_model=tok_model,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            stream=True,
+            recorder=BatchPrinter(),
+            criteria=[classif_report],
+            output_features=output_features
+        )
+
+        tester = ClsTokMultiTester(config)
+    else:
+        def classif_report(Y_true, Y_pred):
+            report = {}
+            for feature, classes  in output_classes:
+
+                report[feature] = classification_report(Y_true[feature], 
+                                                        Y_pred[feature], 
                                                         target_names=classes, 
                                                         zero_division=0,
                                                         digits=4)
-            tok_report[feature] = classification_report(Y_true[feature], 
-                                                        all_preds_tok[feature], 
-                                                        target_names=classes, 
-                                                        zero_division=0,
-                                                        digits=4)
 
-        return (cls_report, tok_report)
+            return report
 
-    config = ClsTokMultiTesterConfig(
-        cls_model=cls_model,
-        tok_model=tok_model,
-        data_loader=data_loader,
-        embedder=params.embedder,
-        stream=True,
-        recorder=BatchPrinter(),
-        criteria=[classif_report],
-        output_features=output_features
-    )
+        config = MultiTesterConfig(
+            model=cls_model,
+            data_loader=data_loader,
+            embedder=params.embedder,
+            stream=True,
+            recorder=BatchPrinter(),
+            criteria=[classif_report],
+            output_features=output_features
+        )
 
-    tester = ClsTokMultiTester(config)
+        tester = MultiTester(config)
 
     results = tester.test()[0] # only one criterion
 
     os.makedirs(params.mdl_url, exist_ok=True)
     with open(os.path.join(params.mdl_url, "test_results.txt"), "w", encoding="utf8") as f:
         for feature in output_features:
-            
-            f.write(feature + " CLS report:\n")
-            f.write(results[0][feature])
+            if params.tok:
+                f.write(feature + " CLS report:\n")
+                f.write(results[0][feature])
+                f.write(feature + " TOK report:\n")
+                f.write(results[1][feature])
+            else:
+                f.write(feature + " CLS report:\n")
+                f.write(results[feature])
 
-            f.write(feature + " TOK report:\n")
-            f.write(results[1][feature])
 
 
 # =============================================
@@ -208,6 +252,8 @@ def test(params):
 
 def test_main(args):
 
+    tok = False
+
     tokenizer, encoder = load_model(args.p)
 
     output_url: str = os.path.expanduser(args.output)
@@ -215,18 +261,22 @@ def test_main(args):
 
     mdl_url: str = os.path.join(output_url, args.m)
 
-    embedder = ClsTokEmbedder(tokenizer, encoder)
+    if tok:
+        embedder = ClsTokEmbedder(tokenizer, encoder)
+    else:
+        embedder = DzDTEmbedder(tokenizer, encoder, pooling = "cls")
 
     params = ObjectDict()
     params.mdl_url = mdl_url
     params.input_url = input_url
     params.embedder = embedder
+    params.tok = tok
     
-    params.batch_size = 1000
+    params.batch_size = 2000
     params.stream=True
     
     if "train" in args.input:
-        params.epochs = 10
+        params.epochs = 100
         params.gamma = 0.1
         train(params)
     else:
@@ -251,21 +301,29 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    src = "~/Data/DZDT/test/morph-tag/ara_conj_train.csv"
+    # src = "~/Data/DZDT/test/morph-tag/ara_conj_train.csv"
     # src = "~/Data/DZDT/test/morph-tag/ara_conj_test.csv"
-    dst = "~/Data/DZDT/results/morph-tag/tst_conj/"
+    # dst = "~/Data/DZDT/results/morph-tag/arabic_conj/"
+
+    # src = "~/Data/DZDT/test/morph-tag/eng_conj_train.csv"
+    # src = "~/Data/DZDT/test/morph-tag/eng_conj_test.csv"
+    # dst = "~/Data/DZDT/results/morph-tag/english_conj/"
+
+    src = "~/Data/DZDT/test/morph-tag/fra_conj_train.csv"
+    # src = "~/Data/DZDT/test/morph-tag/fra_conj_test.csv"
+    dst = "~/Data/DZDT/results/morph-tag/french_conj/"
 
     mdls = [
         # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
-        ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
         # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
-        # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
-        # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
-        # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
-        # ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
-        # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
-        # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
-        # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
+        ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
+        ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
+        ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
+        ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
+        ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
+        ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
+        ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
         # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),

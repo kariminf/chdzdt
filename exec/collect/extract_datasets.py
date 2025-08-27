@@ -381,6 +381,8 @@ def split(url):
     # Save splits
     train_data.to_csv(url.replace(".csv", "_train.csv"), index=False, sep='\t', encoding="utf-8")
     test_data.to_csv(url.replace(".csv", "_test.csv"), index=False, sep='\t', encoding="utf-8")
+
+
 def extract_word_tag(conll_file, output_file):
     with open(conll_file, "r", encoding="utf-8") as f_in, \
          open(output_file, "w", encoding="utf-8") as f_out:
@@ -399,23 +401,6 @@ def extract_word_tag(conll_file, output_file):
         if words:
             f_out.write(" ".join(words) + "\t" + " ".join(tags) + "\n")
             
-def extract_word_tag(conll_file, output_file):
-    with open(conll_file, "r", encoding="utf-8") as f_in, \
-         open(output_file, "w", encoding="utf-8") as f_out:
-        words, tags = [], []
-        for line in f_in:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                if words:
-                    f_out.write(" ".join(words) + "\t" + " ".join(tags) + "\n")
-                    words, tags = [], []
-                continue
-
-            parts = line.split("\t")
-            words.append(parts[1])
-            tags.append(parts[3])
-        if words:
-            f_out.write(" ".join(words) + "\t" + " ".join(tags) + "\n")
 
 
 

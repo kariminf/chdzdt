@@ -88,6 +88,18 @@ class SimpleTrainer:
                 break
         self.config.recorder.finish()
 
+
+class FTSimpleTrainer(SimpleTrainer):
+
+    def epoch_stream(self):
+        epoch_loss = 0.0
+        for text, y in self.config.data_loader: #batch
+            X = self.config.model.tokenize_encode(text, self.device)
+            loss = self.step(X, y)
+            epoch_loss += loss * len(text)
+
+        return epoch_loss / len(self.config.data_loader.dataset)
+
 class MaskedSimpleTrainer(SimpleTrainer):
     def step(self, X_m, y):
         X, mask = X_m
@@ -100,6 +112,87 @@ class MaskedSimpleTrainer(SimpleTrainer):
 
         return loss.item()
 
+
+@dataclass
+class MultiTrainerConfig:
+    model: Module
+    optimizer: Optimizer
+    data_loader: DataLoader
+    output_features: List[str]
+    embedder: Embedder = None
+    recorder: Recorder = Recorder()
+    stream: bool = False
+
+    
+class MultiTrainer:
+    def __init__(self, config: MultiTrainerConfig, device=None):
+        self.device = device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.config = config 
+
+        self.config.model.to(self.device)
+        self.config.model.train()
+
+        self.multiclass_criterion = nn.CrossEntropyLoss()
+        self.binary_criterion = nn.BCEWithLogitsLoss()
+
+
+    def step(self, X, y):
+        X = X.to(self.device)
+        losses = [0.0] * len(self.config.output_features)
+        self.config.optimizer.zero_grad()
+        pred = self.config.model(X)
+        loss = 0.0
+        for j, feature in enumerate(self.config.output_features):
+
+            if pred[feature].shape[-1] == 1:
+                lossi = self.binary_criterion(pred[feature].squeeze(), y[j])
+            else:
+                lossi = self.multiclass_criterion(pred[feature], y[j])
+            losses[j] += lossi.item()
+            loss += lossi
+        loss.backward()
+        self.config.optimizer.step()
+        return losses
+        
+    def epoch(self):
+        epoch_losses = [0.0] * len(self.config.output_features)
+        data_size = len(self.config.data_loader.dataset)
+        for data in self.config.data_loader: #batch
+            X = data[0]
+            y = [d.to(self.device) for d in data[1:]]
+            losses = self.step(X, y)
+
+            weight = len(X[0])/data_size
+
+            for i in range(len(self.config.output_features)):
+                epoch_losses[i] += losses[i] * weight
+
+        return epoch_losses
+
+    def epoch_stream(self):
+        epoch_losses = [0.0] * len(self.config.output_features)
+        data_size = len(self.config.data_loader.dataset)
+        for data in self.config.data_loader: #batch
+            X = self.config.embedder.encode(data[0])
+            y = [d.to(self.device) for d in data[1:]]
+            losses = self.step(X, y)
+
+            weight = len(X[0])/data_size
+
+            for i in range(len(self.config.output_features)):
+                epoch_losses[i] += losses[i] * weight
+
+        return epoch_losses
+
+
+    def train(self, epochs=100, gamma = None):
+        self.config.recorder.start()
+        for epoch in range(epochs):
+            epoch_losses = self.epoch_stream() if self.config.stream else self.epoch()
+            self.config.recorder.record(epoch, epochs, (self.config.output_features, epoch_losses))
+        self.config.recorder.finish()
 
 @dataclass
 class ClsTokMultiTrainerConfig:

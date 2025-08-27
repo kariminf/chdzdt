@@ -87,6 +87,13 @@ class SimpleTester:
         self.config.recorder.finish()
         return results
     
+class FTSimpleTester(SimpleTester):
+
+    def forward_stream(self, text):
+        with torch.no_grad():
+            X = self.config.model.tokenize_encode(text, self.device)
+        return self.forward(X)
+    
 class MaskedSimpleTester(SimpleTester):
     def forward(self, X):
         X = X.to(self.device)
@@ -131,58 +138,76 @@ class MaskedSimpleTester(SimpleTester):
         self.config.recorder.finish()
         return results
 
+@dataclass
+class MultiTesterConfig:
+    model: Module
+    data_loader: DataLoader
+    output_features: List[str]
+    embedder: Embedder = None
+    criteria: List[Any] = None
+    recorder: Recorder = Recorder()
+    stream: bool = False
+    
+class MultiTester:
+    def __init__(self, config: MultiTesterConfig, device=None):
+        self.device = device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.config = config 
 
-# @dataclass
-# class MultiTesterConfig:
-#     models: List[Module]
-#     data_loader: DataLoader
-#     embedder: Embedder = None
-#     criteria: List[Any] = None
-#     recorder: Recorder = Recorder()
-#     stream: bool = False
+        self.config.model.to(self.device)
+        self.config.model.eval()
 
-# class MultiTester:
-#     def __init__(self, config: MultiTesterConfig, device=None):
-#         self.device = device
-#         if device is None:
-#             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#         self.models = config.model 
-#         self.data_loader = config.data_loader
-#         self.embedder = config.embedder
-#         self.recorder = config.recorder
-#         self.criteria = config.criteria
-#         self.stream = config.stream
 
-#         self.model.to(self.device)
-#         self.model.eval()
+    def forward(self, X):
+        X = X.to(self.device)
+        with torch.no_grad():
+            y = self.config.model(X)
+        return y
 
-#     def forward(self, X):
-#         X = X.to(self.device)
-#         pred = []
-#         with torch.no_grad():
-#             for model in self.models:
-#                 pred.append(model(X).cpu().numpy())
-#         return pred
+    def forward_stream(self, text):
+        return self.forward(self.config.embedder.encode(text))
 
-#     def forward_stream(self, text):
-#         return self.forward(self.embedder.encode(text))
+    def test(self):
+        self.config.recorder.start()
+        all_labels = {}
+        all_preds = {}
 
-#     def test(self):
-#         self.recorder.start()
-#         all_preds, all_labels = [], []
-#         i = 0
-#         for data in self.data_loader:
-#             i += 1
-#             self.recorder.record(i)
-#             pred = self.forward_stream(data[0]) if self.stream else self.forward(data[0])
-#             all_preds.extend(pred)
-#             all_labels.extend(data[1:])
+        for feature in self.config.output_features:
+            all_preds[feature] = []
+            all_labels[feature] = []
 
-#         results = []
-#         for criterion in self.criteria:
-#             results.append(criterion(all_labels, all_preds))
+        i = 0
+        for data in self.config.data_loader:
+            i += 1
+            self.config.recorder.record(i)
+            pred = self.forward_stream(data[0]) if self.config.stream else self.forward(data[0])
 
-#         self.recorder.finish()
+            for j, feature in enumerate(self.config.output_features):
+
+                predj = pred[feature].detach().cpu()
+
+                if predj.shape[-1] == 1:
+                    # binary: one logit
+                    predj = torch.sigmoid(predj).squeeze(-1)
+                    predj = (predj > 0.5).long().tolist()
+                else:
+                    predj = np.argmax(predj, axis=1).tolist()
+
+                all_preds[feature].extend(predj)
+
+                y = data[1:][j]
+                if not isinstance(y, list):
+                    y = y.tolist()
+                all_labels[feature].extend(y)
+
+        results = []
+        for criterion in self.config.criteria:
+            results.append(criterion(all_labels, all_preds ))
+
+        self.config.recorder.finish()
+        return results
+
 
 @dataclass
 class ClsTokMultiTesterConfig:
