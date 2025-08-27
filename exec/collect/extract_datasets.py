@@ -19,11 +19,18 @@
 # limitations under the License.
 #
 
+import argparse
 import json
 import csv
+import os
 import sys
 import pandas as pd
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from dzdt.tools.sec import decode_csv, encode_csv
+
 
 
 UNIMORPH_LABELS = {
@@ -400,14 +407,43 @@ def extract_word_tag(conll_file, output_file):
             tags.append(parts[3])
         if words:
             f_out.write(" ".join(words) + "\t" + " ".join(tags) + "\n")
-            
+
+# =======================================================================
+#    Main function 
+# ======================================================================= 
 
 
+def main_func(args):
+    url = os.path.expanduser(args.url)
+    if args.cmd == "encode_csv":
+        encode_csv(url, url.replace(".csv", "_enc.csv"))
+    elif args.cmd == "decode_csv":
+        decode_csv(url, url.replace(".csv", "_dec.csv"))
+    
+
+
+
+# =======================================================================
+#    Command line parser 
+# =======================================================================  
+
+cmd_list = [
+    "unimorph", "encode_csv", "decode_csv"
+]      
+ 
+parser = argparse.ArgumentParser(description="Some scripts to extract datasets")
+parser.add_argument("cmd", help="command", choices=cmd_list)
+parser.add_argument("url", help="output txt file containing the results")
+parser.set_defaults(func=main_func)
 
 
 if __name__ == "__main__":
     argv = sys.argv[1:]
 
-    # jsonl_to_csv(argv[0])
+    argv = [
+        "encode_csv",
+        "/home/karim/Data/DZDT/test/lexicon/french/fr_taboo_noise.csv"
+    ]
 
-    unimorph2csv("/home/karim/Data/DZDT/test/sources/unimorph/eng-master/eng")
+    args = parser.parse_args(argv)
+    args.func(args)

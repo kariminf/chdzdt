@@ -310,7 +310,7 @@ if __name__ == "__main__":
     # dst = "~/Data/DZDT/results/morph-tag/english_conj/"
 
     src = "~/Data/DZDT/test/morph-tag/fra_conj_train.csv"
-    # src = "~/Data/DZDT/test/morph-tag/fra_conj_test.csv"
+    src = "~/Data/DZDT/test/morph-tag/fra_conj_test.csv"
     dst = "~/Data/DZDT/results/morph-tag/french_conj/"
 
     mdls = [

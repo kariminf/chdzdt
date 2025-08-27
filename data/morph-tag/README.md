@@ -8,9 +8,9 @@ Also, it can be used for Morphological (Re-)Inflection: given a lemma and some f
 ## Sources
 
 The raw data was downloaded from [UniMorph](https://unimorph.github.io/) project:
-- Arabic: [](https://github.com/unimorph/ara)
-- English: [](https://github.com/unimorph/eng)
-- French: [](https://github.com/unimorph/fra)
+- Arabic: [https://github.com/unimorph/ara]()
+- English: [https://github.com/unimorph/eng]()
+- French: [https://github.com/unimorph/fra]()
 
 ## Data preparation 
 

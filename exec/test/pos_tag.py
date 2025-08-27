@@ -306,9 +306,9 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
+    src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-test.txt"
-    # dst = "~/Data/DZDT/results/pos-tag/arabic"
+    dst = "~/Data/DZDT/results/pos-tag/arabic"
 
     # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-test.txt"
@@ -319,23 +319,23 @@ if __name__ == "__main__":
     # dst = "~/Data/DZDT/results/pos-tag/english"
 
     # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
-    src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
-    dst = "~/Data/DZDT/results/pos-tag/french"
+    # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
+    # dst = "~/Data/DZDT/results/pos-tag/french"
 
     mdls = [
         # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
         # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
         # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
-        # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
-        # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
-        # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
-        # ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
-        # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
-        # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
-        # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
+        ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
+        ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
+        ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
+        ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
+        ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
+        ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
+        ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
         # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
-        ("flaubert", "flaubert/flaubert_base_uncased"),
+        # ("flaubert", "flaubert/flaubert_base_uncased"),
         # ("dziribert", "alger-ia/dziribert"),
         # ("caninec", "google/canine-c"),
     ]
