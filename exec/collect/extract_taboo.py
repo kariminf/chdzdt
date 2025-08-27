@@ -185,13 +185,10 @@ def process_extract(args):
     
 
 
-parser = argparse.ArgumentParser(description="extract sentences from tatoeba by language labels")
-
-# parser.add_argument("-t", help="source type", default="arramooz", choices=["arramooz", "morphynet", "qutrub"])
-# parser.add_argument("-f", help="form", default="all", choices=["all", "nouns", "fnouns", "verbs"],)
+parser = argparse.ArgumentParser(description="extract clusters")
 parser.add_argument("-a", help="augment data language", default=None, choices=["ar", "fr", "en", "dz"])
 parser.add_argument("-n", help="min number of cluster elements", default=1, type=int)
-parser.add_argument("input", help="input the source file")
+parser.add_argument("input", help="input the source file containing obfuscated words")
 parser.add_argument("output", help="output csv file containing words and their clusters")
 parser.set_defaults(func=process_extract)
 
@@ -211,6 +208,4 @@ if __name__ == "__main__":
     ]
 
     args = parser.parse_args(argv)
-    # print(args)
-    # parser.print_help()
     args.func(args)
