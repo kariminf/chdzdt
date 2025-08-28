@@ -6,11 +6,12 @@ There are two types of csv files:
 - **cls**: clustering dataset with two columns: word \t cluster. The first word in the cluster is the original one and the rest are its variations (using obfuscation). The idea is to compare these variations to the original one using cosine similarity for example. Also, you can use a clustering algorithm on the words codes to test how well the codes are.
 - **noise**: obfuscating one letter. The dataset is composed of three columns: word \t obfus1fix \t obfus1var. obfus1fix is the same word, just a letter is replaced by *. obfus1var is the same word just one letter is replaced by a character used in social media for obfuscation. 
 
+## Access
 
-Since the words are too ofensive, we encoded them to prevent direct readability.
+Since the words are too ofensive, we encoded them to prevent direct access.
 To decode them use:
 ```sh
->> python exec/collect/extract_datasets.py <url-to-encoded-csv>
+>> python exec/collect/extract_taboo.py protect <url-to-encoded-csv>
 ```
 
 ## Sources
@@ -21,4 +22,4 @@ For **cls** dataset, the words were augmented manually, by replacing characters,
 - Arabic and Arabizi were compiled by the author.
 
 ## License
-[Creative Commons Attribution-ShareAlike 3.0 (CC BY-SA 3.0)](https://creativecommons.org/licenses/by-sa/3.0/)
+[Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0)](https://creativecommons.org/licenses/by-sa/4.0/)

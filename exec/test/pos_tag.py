@@ -306,17 +306,17 @@ if __name__ == "__main__":
     # # parser.print_help()
     # args.func(args)
 
-    src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
-    src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-test.txt"
-    dst = "~/Data/DZDT/results/pos-tag/arabic"
+    # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-train.txt"
+    # src = "~/Data/DZDT/test/pos-tag/arabic/ar_padt-ud-test.txt"
+    # dst = "~/Data/DZDT/results/pos-tag/arabic"
 
     # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-test.txt"
     # dst = "~/Data/DZDT/results/pos-tag/arabizi"
 
-    # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-train.txt"
+    src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-test.txt"
-    # dst = "~/Data/DZDT/results/pos-tag/english"
+    dst = "~/Data/DZDT/results/pos-tag/english"
 
     # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"

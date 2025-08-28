@@ -30,6 +30,10 @@ import pandas as pd
 from typing import Dict, Set
 from itertools import product
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from dzdt.tools.sec import decode_csv, encode_csv
+
 SUB = {
     'i': ['1', '!'],
     'a': ['@', '4'],
@@ -174,38 +178,55 @@ def augment_dz(clusters: Dict[str, Set[str]]) -> None:
 
 def process_extract(args):
 
+    clusters = txtlist_extract(args.input, deobfus=args.d) 
+
     if args.a in ["fr", "en"]:
-        clusters = txtlist_extract(args.input) 
         augment_latin(clusters)
     elif args.a == "dz":
-        clusters = txtlist_extract(args.input, deobfus=False) 
         augment_dz(clusters)
 
     extract(clusters, args.output, min_length=args.n, form="all")
-    
+
+def process_extract(args):
+
+    clusters = txtlist_extract(args.input, deobfus=args.d) 
+
+    if args.a in ["fr", "en"]:
+        augment_latin(clusters)
+    elif args.a == "dz":
+        augment_dz(clusters)
+
+    extract(clusters, args.output, min_length=args.n, form="all")
+
+def process_protect(args):
+    url = os.path.expanduser(args.input)
+    if args.e:
+        encode_csv(url, url.replace(".csv", "_enc.csv"))
+    else:
+        decode_csv(url, url.replace(".csv", "_dec.csv"))
 
 
-parser = argparse.ArgumentParser(description="extract clusters")
-parser.add_argument("-a", help="augment data language", default=None, choices=["ar", "fr", "en", "dz"])
-parser.add_argument("-n", help="min number of cluster elements", default=1, type=int)
-parser.add_argument("input", help="input the source file containing obfuscated words")
-parser.add_argument("output", help="output csv file containing words and their clusters")
-parser.set_defaults(func=process_extract)
+
+parser = argparse.ArgumentParser(description="extract taboo/obfuscated lists ")
+subparsers = parser.add_subparsers(help="choose preparing process", required=True)
+
+parser_extract = subparsers.add_parser("extract", help="Extract clusters of obfuscations")
+parser_extract.add_argument("-d", help="deobfuscate: if the input contains obfuscations", default=False, action=argparse.BooleanOptionalAction)
+parser_extract.add_argument("-a", help="augment data language", default=None, choices=["ar", "fr", "en", "dz"])
+parser_extract.add_argument("-n", help="min number of cluster elements", default=1, type=int)
+parser_extract.add_argument("input", help="input the source file containing obfuscated words")
+parser_extract.add_argument("output", help="output csv file containing words and their clusters")
+parser_extract.set_defaults(func=process_extract)
+
+parser_protect = subparsers.add_parser("protect", help="Encode/Decode csv files")
+parser_protect.add_argument("-e", help="encode the file; if absent it will decode", default=False, action=argparse.BooleanOptionalAction)
+parser_protect.add_argument("input", help="input the source file containing obfuscated words")
+parser_protect.set_defaults(func=process_protect)
+
 
 
 if __name__ == "__main__":
 
-    ILOC = "~/Data/DZDT/test/lexicon/source/dz_bad-words.txt"
-    OLOC = "~/Data/DZDT/test/lexicon/dz_taboo_cls.csv"
-
     argv = sys.argv[1:]
-
-    argv = [
-        "-a", "dz",
-        "-n", "1",
-        ILOC,
-        OLOC
-    ]
-
     args = parser.parse_args(argv)
     args.func(args)

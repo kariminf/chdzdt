@@ -27,10 +27,6 @@ import sys
 import pandas as pd
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from dzdt.tools.sec import decode_csv, encode_csv
-
 
 
 UNIMORPH_LABELS = {
@@ -414,11 +410,7 @@ def extract_word_tag(conll_file, output_file):
 
 
 def main_func(args):
-    url = os.path.expanduser(args.url)
-    if args.cmd == "encode_csv":
-        encode_csv(url, url.replace(".csv", "_enc.csv"))
-    elif args.cmd == "decode_csv":
-        decode_csv(url, url.replace(".csv", "_dec.csv"))
+    pass
     
 
 
@@ -428,7 +420,7 @@ def main_func(args):
 # =======================================================================  
 
 cmd_list = [
-    "unimorph", "encode_csv", "decode_csv"
+    "unimorph"
 ]      
  
 parser = argparse.ArgumentParser(description="Some scripts to extract datasets")
