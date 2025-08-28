@@ -26,6 +26,7 @@ import os
 import pandas as pd 
 import re
 import sys
+from itertools import combinations
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -157,6 +158,52 @@ def split2batches(in_url: str, out_url: str, lines_nbr: int, shuffle=True):
         begin = end
 
 
+def bin_onehot_to_dec(vec):
+    base = 1
+    res = 0
+    for e in vec:
+        res += base * e
+        base = base * 2
+    return res
+
+def bin_idx_to_dec(idx):
+    res = 0
+    for i in idx:
+        res += 2**i
+    return res
+
+def list_idx_to_str(l, idx):
+    res = ""
+    for i in idx:
+        res += ("" if i == 0 else "-") + l[i]
+    return res
+
+
+#  TODO complete
+def words_info(in_url: str, out_url: str):
+    data = pd.read_csv(in_url, sep='\t')
+    langs = data.columns[1:].tolist()
+    idx_list = range(len(langs))
+    hash_map = {}
+    for i in idx_list:
+        for cmb in combinations(idx_list, i):
+            hash_map[list_idx_to_str(cmb)] = bin_idx_to_dec(cmb)
+
+    data['hash'] = list(map(lambda l: bin_onehot_to_dec(l), data.iloc[:, 1:].values.tolist()))
+
+    hashes = data['hash'].unique()
+    counts = data['hash'].value_counts()
+
+    with open(out_url, "w", encoding="utf8") as f:
+        f.write("combination\tcount\n")
+        for hash in hashes:
+            
+
+        
+
+
+
+
 # =============================================
 #          Command line functions
 # =============================================
@@ -170,6 +217,11 @@ def process_split(args):
     input = os.path.expanduser(args.input)
     output = os.path.expanduser(args.output)
     split2batches(input, output, args.l, shuffle=args.s)
+
+def process_info(args):
+    input = os.path.expanduser(args.input)
+    output = os.path.expanduser(args.output)
+    words_info(input, output)
 
 
 parser = argparse.ArgumentParser(description="prepare words dataset")
@@ -190,6 +242,11 @@ parser_split.add_argument("-l", help="number of lines per file", type=int, defau
 parser_split.add_argument("input", help="input csv file containing words")
 parser_split.add_argument("output", help="output folder containing splitted files")
 parser_split.set_defaults(func=process_split)
+
+parser_info = subparsers.add_parser("info", help="Information about word dataset")
+parser_info.add_argument("input", help="input csv file containing words")
+parser_info.add_argument("output", help="output file containing the info")
+parser_info.set_defaults(func=process_info)
 
 
 if __name__ == "__main__":

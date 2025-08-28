@@ -266,7 +266,7 @@ def main_func(args):
     params.tags = tags
     params.embedder = embedder
 
-    params.batch_size = 500
+    params.batch_size = 1500 #500
     params.stream=True
 
     try:
@@ -314,16 +314,17 @@ if __name__ == "__main__":
     # src = "~/Data/DZDT/test/pos-tag/arabizi/qaf_arabizi-ud-test.txt"
     # dst = "~/Data/DZDT/results/pos-tag/arabizi"
 
-    src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-train.txt"
+    # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/english/en_gum-ud-test.txt"
-    dst = "~/Data/DZDT/results/pos-tag/english"
+    # dst = "~/Data/DZDT/results/pos-tag/english"
 
-    # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
+    src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
     # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
-    # dst = "~/Data/DZDT/results/pos-tag/french"
+    dst = "~/Data/DZDT/results/pos-tag/french"
 
     mdls = [
-        # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
+        # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),        
+        # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
         # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
         ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
         ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),

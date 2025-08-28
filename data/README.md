@@ -12,4 +12,4 @@
 ## 2. Downstream tasks
 
 - Morphological tagging ("**morph-tag**" folder):  Given an inflected verb, we test whether decoders can recover features such as tense, person, number, gender, or case.
-- 
+- Part-of-Speech tagging ("**pos-tag**" folder): Given a sentence, find the part-of-speech  of each word.

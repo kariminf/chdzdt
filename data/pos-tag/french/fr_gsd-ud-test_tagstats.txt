@@ -1,0 +1,23 @@
+Number of sentences: 416
+Number of words: 10298
+Average sentence size: 24.754807692307693
+
+
+Tags
+NOUN: 1870
+ADP: 1479
+DET: 1479
+PUNCT: 1186
+VERB: 821
+ADJ: 609
+PRON: 559
+ADV: 487
+PROPN: 487
+AUX: 359
+_: 280
+CCONJ: 249
+NUM: 229
+SCONJ: 128
+SYM: 39
+X: 28
+INTJ: 9
