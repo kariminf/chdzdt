@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from dzdt.extra.data import get_csv_string_data
 from dzdt.model.classif import SimpleClassifier, TokenSimpleClassifier
 from dzdt.extra.plms import get_embedding_size, load_model
-from dzdt.pipeline.preprocessor import Embedder
+from dzdt.pipeline.preprocessor import DzDTEmbedder, BertEmbedder
 from dzdt.pipeline.ptdatasets import SimpleDataset
 from dzdt.pipeline.pttesters import SimpleTester, SimpleTesterConfig
 from dzdt.pipeline.recorders import BatchPrinter, WritePrintRecorder
@@ -114,7 +114,7 @@ def train_model(params):
     config = SimpleTrainerConfig(
         model=model,
         data_loader=data_loader,
-        optimizer=torch.optim.Adam(model.parameters(), lr=1e-3),
+        optimizer=torch.optim.Adam(model.parameters(), lr=1e-3), # 1e-3
         criterion=nn.CrossEntropyLoss(),
         embedder=params.embedder,
         recorder=WritePrintRecorder(os.path.join(params.mdl_url, "logs")),
@@ -275,14 +275,18 @@ def main_func(args):
     # print("bye")
     # exit()
 
+    if args.p.startswith("~"):
+        args.p = os.path.expanduser(args.p)
+
+
     tokenizer, encoder = load_model(args.p)
 
     seq = False
     if "chdzdt" in args.p:
         seq = True
-        embedder = Embedder(tokenizer, encoder, pooling="cls", one_word=True)
+        embedder = DzDTEmbedder(tokenizer, encoder, pooling="cls", one_word=True)
     else:
-        embedder = Embedder(tokenizer, encoder, pooling="cls")
+        embedder = BertEmbedder(tokenizer, encoder, pooling="cls")
 
 
     output_url: str = os.path.expanduser(args.output)
@@ -303,7 +307,7 @@ def main_func(args):
     try:
         if "train" in args.input:
             print("training the classification model ...")
-            params.epochs=10
+            params.epochs=100
             params.gamma=0.1
             train_model(params)
         else:
@@ -336,31 +340,34 @@ if __name__ == "__main__":
     # args.func(args)
 
     # src = "~/Data/DZDT/test/text_classif/fr_train.csv"
-    # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.arabic_flt.csv"
-    # dst = "~/Data/DZDT/results/classif/SemEval2017ar_flt/"
+    # src = "~/Data/DZDT/test/text_classif/fr_test.csv"
+    # dst = "~/Data/DZDT/results/classif/Cardiffnlp_fr/"
 
+    # src = "~/Data/DZDT/test/text_classif/twitter-2016train-A_flt.csv"
     # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.english_flt.csv"
     # dst = "~/Data/DZDT/results/classif/SemEval2017en_flt/"
 
-    # src = "~/Data/DZDT/test/text_classif/twifil_test_flt.csv"
-    # dst = "~/Data/DZDT/results/classif/Twifil_dz_flt/"
+    # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-train.subtask-A.arabic_flt.csv"
+    # src = "~/Data/DZDT/test/text_classif/SemEval2017-task4-test.subtask-A.arabic_flt.csv"
+    # dst = "~/Data/DZDT/results/classif/SemEval2017ar_flt/"
 
-    # src = "~/Data/DZDT/test/text_classif/twifil_train_flt.csv"
+    src = "~/Data/DZDT/test/text_classif/twifil_train_flt.csv"
     src = "~/Data/DZDT/test/text_classif/twifil_test_flt.csv"
-    dst = "~/Data/DZDT/results/classif/testing/"
+    dst = "~/Data/DZDT/results/classif/Twifil_dz_flt/"
+
     
 
     mdls = [
         # ("chdzdt_5x4x128_20it", "~/Data/DZDT/models/chdzdt_5x4x128_20it"),
         # ("chdzdt_4x4x64_20it", "~/Data/DZDT/models/chdzdt_4x4x64_20it"),
-        ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
-        # ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
-        # ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
-        # ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
-        # ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
-        # ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
-        # ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
-        # ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
+        # ("chdzdt_4x4x32_20it", "~/Data/DZDT/models/chdzdt_4x4x32_20it"),
+        ("chdzdt_3x2x16_20it", "~/Data/DZDT/models/chdzdt_3x2x16_20it"),
+        ("chdzdt_2x1x16_20it", "~/Data/DZDT/models/chdzdt_2x1x16_20it"),
+        ("chdzdt_2x4x16_20it", "~/Data/DZDT/models/chdzdt_2x4x16_20it"),
+        ("chdzdt_2x2x32_20it", "~/Data/DZDT/models/chdzdt_2x2x32_20it"),
+        ("chdzdt_2x2x16_20it", "~/Data/DZDT/models/chdzdt_2x2x16_20it"),
+        ("chdzdt_2x2x8_20it", "~/Data/DZDT/models/chdzdt_2x2x8_20it"),
+        ("chdzdt_1x2x16_20it", "~/Data/DZDT/models/chdzdt_1x2x16_20it"),
         # ("arabert", "aubmindlab/bert-base-arabertv02-twitter"),
         # ("bert", "google-bert/bert-base-uncased"),
         # ("flaubert", "flaubert/flaubert_base_uncased"),

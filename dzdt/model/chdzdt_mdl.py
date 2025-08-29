@@ -25,38 +25,18 @@ import torch
 # import torch.utils.checkpoint
 from torch import nn
 from dataclasses import dataclass
+import os
+import pickle
+import json
 
-from transformers.models.bert import BertModel, BertPreTrainedModel
+from transformers.models.bert import BertModel, BertPreTrainedModel, BertConfig
 from transformers.models.bert.modeling_bert import ModelOutput, BertLMPredictionHead
+
+from dzdt.tools.io import process_hub_path, HubMixin
 
 
 @dataclass
 class BertForMLMLMPreTrainingOutput(ModelOutput):
-    """
-    Output type of [`BertForPreTraining`].
-
-    Args:
-        loss (*optional*, returned when `labels` is provided, `torch.FloatTensor` of shape `(1,)`):
-            Total loss as the sum of the masked language modeling loss and the next sequence prediction
-            (classification) loss.
-        prediction_logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        seq_relationship_logits (`torch.FloatTensor` of shape `(batch_size, 2)`):
-            Prediction scores of the next sequence prediction (classification) head (scores of True/False continuation
-            before SoftMax).
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer) of
-            shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
     pooler_output: Optional[torch.FloatTensor] = None
     last_hidden_state: Optional[torch.FloatTensor] = None
     prediction_logits: torch.FloatTensor = None
@@ -92,6 +72,25 @@ class BertForMLMLMPreTrainingOutput(ModelOutput):
 #         return hidden_states
     
 class MLMLMBertPreTrainingHeads(nn.Module):
+    """
+    MLMLMBertPreTrainingHeads is a neural network module designed for BERT-based pretraining tasks.
+    It combines a masked language modeling (MLM) prediction head and a sequence classification head.
+
+    Args:
+        config: Configuration object containing model hyperparameters such as hidden size and number of labels.
+
+    Attributes:
+        predictions (BertLMPredictionHead): Head for masked language modeling predictions.
+        seq_labels (nn.Linear): Linear layer for sequence-level classification or labeling.
+
+    Forward Args:
+        sequence_output (torch.Tensor): Output tensor from the BERT encoder for each token in the sequence.
+        pooled_output (torch.Tensor): Pooled output tensor representing the entire sequence (e.g., [CLS] token).
+
+    Returns:
+        prediction_scores (torch.Tensor): Scores for masked language modeling for each token.
+        seq_labels_score (torch.Tensor): Scores for sequence-level classification or labeling.
+    """
     def __init__(self, config):
         super().__init__()
         self.predictions = BertLMPredictionHead(config)
@@ -104,7 +103,48 @@ class MLMLMBertPreTrainingHeads(nn.Module):
         return prediction_scores, seq_labels_score
 
 
-class MLMLMBertModel(BertPreTrainedModel):
+class MLMLMBertModel(BertPreTrainedModel, HubMixin):
+    """MLMLMBertModel is a custom BERT-based model designed for joint masked language modeling (MLM) and multi-label classification tasks.
+    Args:
+        config (BertConfig): Model configuration object containing hyperparameters and settings.
+    Attributes:
+        bert (BertModel): The underlying BERT model for encoding input sequences.
+        cls (MLMLMBertPreTrainingHeads): Head module for MLM and multi-label classification.
+        mlmloss (nn.CrossEntropyLoss): Loss function for masked language modeling.
+        clsloss (nn.BCEWithLogitsLoss): Loss function for multi-label classification.
+    Methods:
+        get_output_embeddings():
+            Returns the output embedding layer used for MLM predictions.
+        set_output_embeddings(new_embeddings):
+            Sets the output embedding layer for MLM predictions.
+        forward(
+            Performs a forward pass through the model.
+            Args:
+                input_ids (torch.Tensor, optional): Token IDs for input sequences.
+                attention_mask (torch.Tensor, optional): Mask to avoid attention on padding tokens.
+                token_type_ids (torch.Tensor, optional): Segment token indices.
+                position_ids (torch.Tensor, optional): Position indices for input tokens.
+                head_mask (torch.Tensor, optional): Mask for attention heads.
+                inputs_embeds (torch.Tensor, optional): Precomputed input embeddings.
+                labels (torch.Tensor, optional): Labels for MLM loss computation.
+                multi_labels (torch.Tensor, optional): Labels for multi-label classification loss.
+                output_attentions (bool, optional): Whether to return attention weights.
+                output_hidden_states (bool, optional): Whether to return hidden states.
+                return_dict (bool, optional): Whether to return a dict or tuple.
+                BertForMLMLMPreTrainingOutput or tuple:
+                    - prediction_logits: MLM prediction scores.
+                    - seq_labels_logits: Multi-label classification scores.
+                    - masked_lm_loss: MLM loss (if labels provided).
+                    - multi_label_loss: Multi-label classification loss (if multi_labels provided).
+                    - loss: Total loss (if both labels and multi_labels provided).
+                    - pooler_output: Pooled output from BERT.
+                    - last_hidden_state: Last hidden state from BERT.
+                    - hidden_states: Hidden states from BERT (if requested).
+                    - attentions: Attention weights from BERT (if requested).
+        """
+
+
+    files = ["char_config.json", "char_pytorch_model.bin"]
     _keys_to_ignore_on_load_missing = [r"position_ids", r"token_type_ids", r"predictions.decoder.bias", r"cls.predictions.decoder.weight"]
     def __init__(self, config):
         super().__init__(config)
@@ -220,4 +260,48 @@ class MLMLMBertModel(BertPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+    
+    @classmethod
+    def from_pretrained(cls, pretrained_path: str, **kwargs) -> "MLMLMBertModel":
+        """Loads a MLMLMBertModel instance from a pretrained path.
+
+        This method attempts to load a tokenizer from a local file if the given path exists.
+        If the path does not correspond to a local file, it loads the tokenizer from a remote hub,
+        using HuggingFace-style arguments.
+
+        Args:
+            pretrained_path (str): Path to the pretrained tokenizer file or hub identifier.
+            **kwargs: Additional keyword arguments passed to the hub loading function.
+
+        Returns:
+            CharTokeMLMLMBertModelnizer: An instance of MLMLMBertModel loaded from the specified source.
+        """
+
+        if os.path.isdir(pretrained_path):
+            return cls.load(pretrained_path)
+
+        return cls.load_from_hub(**process_hub_path(pretrained_path), **kwargs)
+    
+    @classmethod
+    def _load_from_files(cls, local_files, **kwargs):
+        
+        with open(local_files[cls.files[0]], "r") as f:
+            config = json.load(f)
+        with open(local_files[cls.files[1]], "rb") as f:
+            state = torch.load(f)
+        config = BertConfig.from_dict(config)
+        mdl = cls(config)
+        mdl.load_state_dict(state)
+        return mdl
+    
+    @classmethod
+    def load(cls, path: str) -> "MLMLMBertModel":
+        with open(os.path.join(path, cls.files[0]), "r") as f:
+            config = json.load(f)
+        with open(os.path.join(path, cls.files[1]), "rb") as f:
+            state = torch.load(f)
+        config = BertConfig.from_dict(config)
+        mdl = cls(config)
+        mdl.load_state_dict(state)
+        return mdl
 

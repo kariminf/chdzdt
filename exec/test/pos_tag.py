@@ -319,7 +319,7 @@ if __name__ == "__main__":
     # dst = "~/Data/DZDT/results/pos-tag/english"
 
     src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-train.txt"
-    # src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
+    src = "~/Data/DZDT/test/pos-tag/french/fr_gsd-ud-test.txt"
     dst = "~/Data/DZDT/results/pos-tag/french"
 
     mdls = [

@@ -21,6 +21,7 @@
 
 from typing import Any, Union, List, Optional
 from dzdt.tools.chars import CharManager, DOUBLE_SPACE
+from dzdt.tools.io import HubMixin, process_hub_path
 from dzdt.tools.struct import BatchEncoder
 import numpy as np
 # from tokenizers.models import Model
@@ -33,9 +34,19 @@ import os
 
 # Latin Extended-D (4 letters will be used as special tokens)
 
-class CharTokenizer(CharManager): #, Model
+class CharTokenizer(CharManager, HubMixin):
+
+    files = ["char_tokenizer.pkl"]
+
     # kwargs are added just for compatibility with BERT tokenizers
     def __init__(self, max_position=20, **kwargs) -> None:
+        """
+        Initialize the CharTokenizer.
+
+        Args:
+            max_position (int): Maximum length of encoded words.
+            **kwargs: Additional keyword arguments for compatibility with BERT tokenizers (currently unused).
+        """
         super().__init__()
 
         self.max_position = max_position
@@ -237,6 +248,36 @@ class CharTokenizer(CharManager): #, Model
             pickle.dump(self.state_dict(), f)
 
     @classmethod
+    def from_pretrained(cls, pretrained_path: str, **kwargs) -> "CharTokenizer":
+        """Loads a CharTokenizer instance from a pretrained path.
+
+        This method attempts to load a tokenizer from a local file if the given path exists.
+        If the path does not correspond to a local file, it loads the tokenizer from a remote hub,
+        using HuggingFace-style arguments.
+
+        Args:
+            pretrained_path (str): Path to the pretrained tokenizer file or hub identifier.
+            **kwargs: Additional keyword arguments passed to the hub loading function.
+
+        Returns:
+            CharTokenizer: An instance of CharTokenizer loaded from the specified source.
+        """
+
+        if os.path.isfile(pretrained_path):
+            return cls.load(pretrained_path)
+        
+        if os.path.isdir(pretrained_path):
+            p = os.path.join(pretrained_path, cls.files[0])
+            if os.path.isfile(p):
+                return cls.load(p)
+
+        return cls.load_from_hub(**process_hub_path(pretrained_path), **kwargs)
+
+    @classmethod
+    def _load_from_files(cls, local_files, **kwargs):
+        return cls.load(local_files[cls.files[0]])
+    
+    @classmethod
     def load(cls, path: str) -> "CharTokenizer":
         with open(path, "rb") as f:
             state = pickle.load(f)
@@ -248,5 +289,3 @@ class CharTokenizer(CharManager): #, Model
         if " " in sequence:
             return sequence.split()
         return list(sequence)
-
-

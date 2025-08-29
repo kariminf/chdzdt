@@ -46,14 +46,55 @@ from dzdt.extra.data import get_word_cluster_data, get_word_noisy_data
 # =============================================
 
 def cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
-    """Calculate the cosine similarity between two aligned sets of embeddings (row-wise)."""
+    """
+    Calculates the average cosine similarity between two aligned sets of embeddings.
+
+    Args:
+        emb1 (np.ndarray): First set of embeddings, shape (n_samples, n_features).
+        emb2 (np.ndarray): Second set of embeddings, shape (n_samples, n_features).
+
+    Returns:
+        float: The mean cosine similarity between corresponding rows of emb1 and emb2.
+
+    Raises:
+        ValueError: If emb1 and emb2 do not have the same shape.
+
+    Example:
+        >>> import numpy as np
+        >>> emb1 = np.array([[1, 0], [0, 1]])
+        >>> emb2 = np.array([[0, 1], [1, 0]])
+        >>> cosine_similarity(emb1, emb2)
+        0.0
+    """
+    
     return (np.sum(emb1 * emb2, axis=1) / (np.linalg.norm(emb1, axis=1) * np.linalg.norm(emb2, axis=1))).mean()
 
 def euclidean(emb1: np.ndarray, emb2: np.ndarray) -> float:
+    """
+    Calculates the mean Euclidean distance between corresponding rows of two embedding arrays.
+
+    Args:
+        emb1 (np.ndarray): First array of embeddings with shape (n_samples, n_features).
+        emb2 (np.ndarray): Second array of embeddings with shape (n_samples, n_features).
+
+    Returns:
+        float: The mean Euclidean distance between each pair of corresponding rows in emb1 and emb2.
+    """
     return np.linalg.norm(emb1 - emb2, axis=1).mean()
 
-# returns adjusted rand score over the clusters
+
 def kmeans_ari(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
+    """
+    Performs KMeans clustering on the given embeddings and computes the Adjusted Rand Index (ARI) 
+    between the predicted cluster labels and the provided true labels.
+
+    Args:
+        embeddings (np.ndarray): Array of shape (n_samples, n_features) representing the data points to cluster.
+        true_labels (np.ndarray): Array of shape (n_samples,) containing the ground truth labels for each data point.
+
+    Returns:
+        float: The Adjusted Rand Index (ARI) score measuring the similarity between the true labels and the predicted cluster labels.
+    """
 
     # Perform KMeans clustering
     kmeans = KMeans(n_clusters=np.unique(true_labels).size, random_state=42)
@@ -61,13 +102,41 @@ def kmeans_ari(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
 
     return adjusted_rand_score(true_labels, predicted_labels)
 
-# returns sillouette
+
 def silhouette(embeddings: np.ndarray, true_labels: np.ndarray) -> float:
+    """
+    Calculates the silhouette score for the given embeddings and true labels.
+
+    The silhouette score is a measure of how similar an object is to its own cluster compared to other clusters.
+    It ranges from -1 to 1, where a higher value indicates that the object is well matched to its own cluster and poorly matched to neighboring clusters.
+
+    Args:
+        embeddings (np.ndarray): Array of shape (n_samples, n_features) representing the data points.
+        true_labels (np.ndarray): Array of shape (n_samples,) containing the cluster labels for each data point.
+
+    Returns:
+        float: The silhouette score for the given clustering.
+    """
     return silhouette_score(embeddings, true_labels)
 
-# returns average cosine similarity and euclidean distance  #
-# of elements of each cluster with their first element (representative)
+
 def cluster_cos_euc(embeddings: np.ndarray, true_labels: np.ndarray) -> Tuple[float, float]:
+    """
+    Computes the average cosine similarity and Euclidean distance between embeddings within the same cluster.
+
+    For each cluster (as indicated by `true_labels`), the function selects the first embedding as the representative.
+    It then calculates the cosine similarity and Euclidean distance between the representative and each subsequent embedding in the same cluster.
+    The averages are computed over all intra-cluster pairs.
+
+    Args:
+        embeddings (np.ndarray): Array of embedding vectors.
+        true_labels (np.ndarray): Array of cluster labels corresponding to each embedding.
+
+    Returns:
+        Tuple[float, float]: A tuple containing:
+            - Average cosine similarity within clusters.
+            - Average Euclidean distance within clusters.
+    """
     sim = 0.0
     euc = 0.0
 

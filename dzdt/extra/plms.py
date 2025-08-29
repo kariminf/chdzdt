@@ -37,25 +37,27 @@ from dzdt.model.chdzdt_mdl import MLMLMBertModel
 # =============================================
 
 def load_chdzdt_model(plm_loc: str) -> Tuple[CharTokenizer, MLMLMBertModel]:
-    """ Load a CHDZDT model from the specified path.
+    """ Loads a CHDZDT model from the specified path.
     Args:
         plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
     Returns:
         Tuple[CharTokenizer, MLMLMBertModel]: A tuple containing the character tokenizer and the model.
     """
-    plm_loc = os.path.expanduser(plm_loc)
+    # plm_loc = os.path.expanduser(plm_loc)
     # print("loading characters tokenizer")
-    char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pkl"))
+    # char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(plm_loc, "char_tokenizer.pkl"))
+    char_tokenizer: CharTokenizer = CharTokenizer.from_pretrained(plm_loc)
 
     # print("loading characters encoder")
-    char_tokenizer_config()
+    # char_tokenizer_config()
+    # char_encoder = MLMLMBertModel.from_pretrained(plm_loc)
+    # word_tokenizer_config()
     char_encoder = MLMLMBertModel.from_pretrained(plm_loc)
-    word_tokenizer_config()
 
     return char_tokenizer, char_encoder
 
 def load_bertlike_model(plm_loc: str) -> Tuple[BertTokenizer, BertModel]:
-    """ Load a BERT-like model from the specified path.
+    """ Loads a BERT-like model from the specified path.
     This function supports models like BERT, RoBERTa, and others that are compatible with the Hugging Face Transformers library.
     Args:
         plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
@@ -74,7 +76,7 @@ def load_bertlike_model(plm_loc: str) -> Tuple[BertTokenizer, BertModel]:
     return tokenizer, model.bert
 
 def load_canine_model(plm_loc: str) -> Tuple[CanineTokenizer, CanineModel]:
-    """ Load a Canine model from the specified path.
+    """ Loads a Canine model from the specified path.
     Args:
         plm_loc (str): The path to the pre-trained model or the model identifier from Hugging Face's model hub.
     Returns:
@@ -92,6 +94,20 @@ def load_canine_model(plm_loc: str) -> Tuple[CanineTokenizer, CanineModel]:
     return tokenizer, model.bert 
 
 def arabert_preprocess(texts: List[str], model_name: str) -> List[str]:
+    """
+    Preprocesses a list of Arabic texts using the specified AraBERT model's preprocessing pipeline.
+
+    Args:
+        texts (List[str]): A list of Arabic text strings to preprocess.
+        model_name (str): The name of the AraBERT model to use for preprocessing.
+
+    Returns:
+        List[str]: A list of preprocessed Arabic text strings.
+
+    Example:
+        >>> arabert_preprocess(["مرحبا بالعالم"], "aubmindlab/bert-base-arabertv2")
+        ['مرحبا ب العالم']
+    """
     from arabert.preprocess import ArabertPreprocessor
     arabert_prep = ArabertPreprocessor(model_name=model_name)
     result = []

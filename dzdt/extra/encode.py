@@ -24,6 +24,17 @@ from sklearn.preprocessing import LabelEncoder
 
 
 def encode_tags(le: LabelEncoder, Y_tags, train=False):
+    """
+    Encodes sequences of tags using a provided LabelEncoder.
+
+    Parameters:
+        le (LabelEncoder): An instance of sklearn's LabelEncoder.
+        Y_tags (list of list of str): A list of sequences, where each sequence is a list of tags to encode.
+        train (bool, optional): If True, fit the LabelEncoder on all tags before transforming. Default is False.
+
+    Returns:
+        np.ndarray: An array of encoded tag sequences with dtype int64.
+    """
     # flatten all tags
     all_tags = [tag for seq in Y_tags for tag in seq]
     if train:

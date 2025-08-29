@@ -36,5 +36,22 @@ import umap
 
 
 def log_scaling(X: np.array) -> np.array:
+    """
+    Applies logarithmic scaling to the input array.
+
+    This function shifts the input array so that its minimum value becomes slightly above zero,
+    preventing issues with taking the logarithm of zero or negative values. It then applies the
+    natural logarithm to each element.
+
+    Parameters
+    ----------
+    X : np.array
+        Input array to be scaled.
+
+    Returns
+    -------
+    np.array
+        Logarithmically scaled array.
+    """
     X_pos = X - X.min() + 1e-6
     return np.log(X_pos)

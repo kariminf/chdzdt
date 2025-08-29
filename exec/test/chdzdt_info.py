@@ -38,12 +38,24 @@ LOC = os.path.expanduser("~/Data/DZDT/models/chdzdt_2x4x16_20it")
 words = ["qaꞢwa", "gatꞢau", "plꞢy", "خدꞢت", "يꞢمل", "kittꞢn", "أكتوبر"]
 
 print("loading characters tokenizer")
-char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(LOC, "char_tokenizer.pickle"))
+# char_tokenizer: CharTokenizer = CharTokenizer.load(os.path.join(LOC, "char_tokenizer.pkl"))
+
+TOKEN_PATH = os.path.expanduser("~/Data/DZDT/hug_token_read.txt")
+with open(TOKEN_PATH, "r") as f:
+    for l in f:
+        hugingface_token = l.rstrip("\n")
+        break
+
+print(hugingface_token)
+
+char_tokenizer: CharTokenizer = CharTokenizer.from_pretrained("huggingface:kariminf/chdzdt", token=hugingface_token)
 
 print("loading characters encoder")
-char_tokenizer_config()
-char_encoder = MLMLMBertModel.from_pretrained(LOC)
-word_tokenizer_config()
+# char_tokenizer_config()
+# char_encoder = MLMLMBertModel.from_pretrained(LOC)
+# word_tokenizer_config()
+
+char_encoder = MLMLMBertModel.from_pretrained("huggingface:kariminf/chdzdt:chdzdt_1x2x16_20it", token=hugingface_token)
 
 print("encoding ...")
 char_tokens = char_tokenizer.encode_words(words, return_tensors="pt")
