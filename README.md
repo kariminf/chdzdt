@@ -12,6 +12,20 @@ In addition, it can serve as a preprocessing module to enhance traditional langu
 **This project is a part of a larger project called DzDT started on 2023. It was separated on August 2025 to handle only the morphology part of the project.**
 
 
+# Training a chDzDT model
+
+- To specify the configuration of the model, please see this example [config/chdzdt_train/chdzdt_train.json]()
+- To train a new model
+```sh
+>> exec/train/chdzdt.trn.py new <config-file-url>
+```
+- To resume training a model
+```sh
+>> exec/train/chdzdt.trn.py resume <config-file-url> <trained-model-folder>
+```
+
+
+
 # License
 
 Copyright (C) 2025 Abdelkrime Aries

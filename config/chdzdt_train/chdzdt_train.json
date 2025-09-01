@@ -1,0 +1,17 @@
+{
+    "project_path": "~/Data/DZDT/",
+    "words_url": "data/2_words/words.csv",
+    "chardzdt_url": "models/chdzdt_5x4x128_20it",
+    "max_char_position": 20,
+    "charsets": [[33, 126], [161, 255], [592, 687], [1536, 1791], [11568, 11647]],
+    "batch_size": 2000,
+    "words_file_type": "csv",
+    "words_idx": 0,
+    "class_idx": [1, null],
+    "text_label": "word",
+    "labels": ["AR", "BER", "DZ", "EN", "FR"],
+    "hidden_size": 128,
+    "num_hidden_layers": 5,
+    "num_attention_heads": 4,
+    "epochs": 20
+}
