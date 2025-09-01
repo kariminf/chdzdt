@@ -19,6 +19,7 @@
 # limitations under the License.
 #
 
+import re
 import argparse
 import json
 import csv
@@ -403,6 +404,15 @@ def extract_word_tag(conll_file, output_file):
             tags.append(parts[3])
         if words:
             f_out.write(" ".join(words) + "\t" + " ".join(tags) + "\n")
+
+def clean_tweet(text):
+    # Remove URLs
+    text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
+    # Remove mentions (@username)
+    text = re.sub(r"@\w+", "", text)
+    # Remove extra spaces
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 # =======================================================================
 #    Main function 
