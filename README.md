@@ -24,7 +24,22 @@ In addition, it can serve as a preprocessing module to enhance traditional langu
 >> exec/train/chdzdt.trn.py resume <config-file-url> <trained-model-folder>
 ```
 
+# More information
 
+Please refer to this Article: [arXiv:2509.01772](https://arxiv.org/abs/2509.01772)
+
+You can cite it as:
+```
+@misc{2025-aries-chdzdt,
+      title={chDzDT: Word-level morphology-aware language model for Algerian social media text}, 
+      author={Abdelkrime Aries},
+      year={2025},
+      eprint={2509.01772},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2509.01772}, 
+}
+```
 
 # License
 
